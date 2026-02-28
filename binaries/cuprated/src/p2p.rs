@@ -93,6 +93,10 @@ impl NetworkInterfaces {
 
 /// Initialize the clearnet P2P network zone. Returns [`NetworkInterface<ClearNet>`] and
 /// [`Sender<IncomingTxHandler>`] for propagating the tx handler.
+///
+/// # Errors
+///
+/// Returns an error if the P2P network fails to start.
 pub async fn initialize_clearnet_p2p(
     config: &Config,
     context_svc: BlockchainContextService,
@@ -100,8 +104,8 @@ pub async fn initialize_clearnet_p2p(
     txpool_read_handle: TxpoolReadHandle,
     tor_ctx: &TorContext,
     shutdown_handle: ShutdownHandle,
-) -> (NetworkInterface<ClearNet>, Sender<IncomingTxHandler>) {
-    match config.p2p.clear_net.proxy {
+) -> Result<(NetworkInterface<ClearNet>, Sender<IncomingTxHandler>), anyhow::Error> {
+    Ok(match config.p2p.clear_net.proxy {
         ProxySettings::Tor => match tor_ctx.mode {
             #[cfg(feature = "arti")]
             TorMode::Arti => {
@@ -115,7 +119,7 @@ pub async fn initialize_clearnet_p2p(
                     shutdown_handle,
                 )
                 .await
-                .unwrap()
+                .map_err(anyhow::Error::from_boxed)?
             }
             TorMode::Daemon => start_zone_p2p::<ClearNet, Socks>(
                 blockchain_read_handle,
@@ -126,7 +130,7 @@ pub async fn initialize_clearnet_p2p(
                 shutdown_handle,
             )
             .await
-            .unwrap(),
+            .map_err(anyhow::Error::from_boxed)?,
             TorMode::Auto => unreachable!("Auto mode should be resolved before this point"),
         },
         ProxySettings::Socks(ref s) => {
@@ -137,10 +141,10 @@ pub async fn initialize_clearnet_p2p(
                     txpool_read_handle,
                     config.clearnet_p2p_config(),
                     config.p2p.clear_net.tcp_transport_config(config.network),
-                    shutdown_handle.clone(),
+                    shutdown_handle,
                 )
                 .await
-                .unwrap()
+                .map_err(anyhow::Error::from_boxed)?
             } else {
                 start_zone_p2p::<ClearNet, Socks>(
                     blockchain_read_handle,
@@ -148,20 +152,24 @@ pub async fn initialize_clearnet_p2p(
                     txpool_read_handle,
                     config.clearnet_p2p_config(),
                     TransportConfig {
-                        client_config: socks_proxy_str_to_config(s).unwrap(),
+                        client_config: socks_proxy_str_to_config(s)?,
                         server_config: None,
                     },
-                    shutdown_handle.clone(),
+                    shutdown_handle,
                 )
                 .await
-                .unwrap()
+                .map_err(anyhow::Error::from_boxed)?
             }
         }
-    }
+    })
 }
 
 /// Start the Tor P2P network zone. Returns [`NetworkInterface<Tor>`] and
 /// a [`Sender<IncomingTxHandler>`] for propagating the tx handler.
+///
+/// # Errors
+///
+/// Returns an error if the Tor P2P network fails to start.
 pub async fn start_tor_p2p(
     config: &Config,
     context_svc: BlockchainContextService,
@@ -169,8 +177,8 @@ pub async fn start_tor_p2p(
     txpool_read_handle: TxpoolReadHandle,
     tor_ctx: TorContext,
     shutdown_handle: ShutdownHandle,
-) -> (NetworkInterface<Tor>, Sender<IncomingTxHandler>) {
-    match tor_ctx.mode {
+) -> Result<(NetworkInterface<Tor>, Sender<IncomingTxHandler>), anyhow::Error> {
+    Ok(match tor_ctx.mode {
         TorMode::Daemon => start_zone_p2p::<Tor, Daemon>(
             blockchain_read_handle,
             context_svc,
@@ -180,7 +188,7 @@ pub async fn start_tor_p2p(
             shutdown_handle,
         )
         .await
-        .unwrap(),
+        .map_err(anyhow::Error::from_boxed)?,
         #[cfg(feature = "arti")]
         TorMode::Arti => start_zone_p2p::<Tor, Arti>(
             blockchain_read_handle,
@@ -191,9 +199,9 @@ pub async fn start_tor_p2p(
             shutdown_handle,
         )
         .await
-        .unwrap(),
+        .map_err(anyhow::Error::from_boxed)?,
         TorMode::Auto => unreachable!("Auto mode should be resolved before this point"),
-    }
+    })
 }
 
 /// Starts the P2P network zone, returning a [`NetworkInterface`] to interact with it.

@@ -1,4 +1,6 @@
 use std::future::Future;
+use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::Arc;
 
 use tokio::task::JoinHandle;
 use tokio_util::{sync::CancellationToken, task::TaskTracker};
@@ -10,9 +12,15 @@ use crate::error::CupratedError;
 #[derive(Clone)]
 pub struct ShutdownHandle {
     token: CancellationToken,
+    exit_code: Arc<AtomicU8>,
 }
 
 impl ShutdownHandle {
+    /// Read the current exit code.
+    pub fn exit_code(&self) -> u8 {
+        self.exit_code.load(Ordering::Relaxed)
+    }
+
     /// Get a clone of the cancellation token.
     pub fn token(&self) -> CancellationToken {
         self.token.clone()
@@ -31,12 +39,13 @@ impl ShutdownHandle {
         self.token.cancel();
     }
 
-    /// Log a fatal error and trigger shutdown.
+    /// Log a fatal error, set exit code, and trigger shutdown.
     fn fatal(&self, error: &impl std::fmt::Display) {
         if self.token.is_cancelled() {
             return;
         }
         tracing::error!("{error}");
+        self.exit_code.store(1, Ordering::Relaxed);
         self.trigger_shutdown();
     }
 
@@ -88,6 +97,7 @@ pub fn new() -> (CupratedSupervisor, CupratedTask) {
     let task_tracker = TaskTracker::new();
     let shutdown_handle = ShutdownHandle {
         token: CancellationToken::new(),
+        exit_code: Arc::new(AtomicU8::new(0)),
     };
 
     (

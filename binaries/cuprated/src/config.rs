@@ -73,19 +73,17 @@ const HEADER: &str = r"##     ____                      _
 ";
 
 /// Reads the args & config file, returning a [`Config`].
-pub fn read_config_and_args() -> Config {
+///
+/// # Errors
+///
+/// Returns an error if a user-specified config file cannot be read or parsed.
+pub fn read_config_and_args() -> Result<Config, anyhow::Error> {
     let args = args::Args::parse();
     args.do_quick_requests();
 
     let config: Config = if let Some(config_file) = &args.config_file {
-        // If a config file was set in the args try to read it and exit if we can't.
-        match Config::read_from_path(config_file) {
-            Ok(config) => config,
-            Err(e) => {
-                eprintln_red(&format!("Failed to read config from file: {e}"));
-                std::process::exit(1);
-            }
-        }
+        // If a config file was set in the args try to read it.
+        Config::read_from_path(config_file)?
     } else {
         // First attempt to read the config file from the current directory.
         std::env::current_dir()
@@ -114,7 +112,7 @@ pub fn read_config_and_args() -> Config {
         config.dry_run_check();
     }
 
-    config
+    Ok(config)
 }
 
 config_struct! {
@@ -213,15 +211,7 @@ impl Config {
         let file_text = read_to_string(file.as_ref())?;
 
         Ok(toml::from_str(&file_text)
-            .inspect(|_| println!("Using config at: {}", file.as_ref().to_string_lossy()))
-            .inspect_err(|e| {
-                eprintln_red(&format!(
-                    "Failed to parse config file at: {}",
-                    file.as_ref().to_string_lossy()
-                ));
-                eprintln_red(&format!("{e}"));
-                std::process::exit(1);
-            })?)
+            .inspect(|_| println!("Using config at: {}", file.as_ref().to_string_lossy()))?)
     }
 
     /// Returns the current [`Network`] we are running on.

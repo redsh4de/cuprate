@@ -28,8 +28,8 @@ use crate::{
 
 /// Initialize the RPC server(s).
 ///
-/// # Panics
-/// This function will panic if unrestricted RPC is started on a non-local
+/// # Errors
+/// Returns an error if unrestricted RPC is started on a non-local
 /// address without the override option.
 pub fn init_rpc_servers(
     config: RpcConfig,
@@ -39,7 +39,7 @@ pub fn init_rpc_servers(
     txpool_read: TxpoolReadHandle,
     tx_handler: IncomingTxHandler,
     task: CupratedTask,
-) {
+) -> Result<(), Error> {
     for ((enable, addr, port, request_byte_limit), restricted) in [
         (
             (
@@ -75,7 +75,7 @@ pub fn init_rpc_servers(
                     "Starting unrestricted RPC on non-local address, this is dangerous!"
                 );
             } else {
-                panic!("Refusing to start unrestricted RPC on a non-local address ({addr})");
+                anyhow::bail!("Refusing to start unrestricted RPC on a non-local address ({addr})");
             }
         }
 
@@ -104,6 +104,8 @@ pub fn init_rpc_servers(
             move || info!(restricted, "RPC server shut down."),
         );
     }
+
+    Ok(())
 }
 
 /// This initializes and runs an RPC server.

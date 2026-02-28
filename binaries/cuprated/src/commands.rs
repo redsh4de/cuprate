@@ -69,7 +69,7 @@ pub enum OutputTarget {
 }
 
 /// The [`Command`] listener loop.
-pub fn command_listener(incoming_commands: mpsc::Sender<Command>) {
+pub fn command_listener(incoming_commands: mpsc::Sender<Command>) -> Result<(), anyhow::Error> {
     let mut stdin = io::stdin();
     let mut line = String::new();
 
@@ -77,7 +77,7 @@ pub fn command_listener(incoming_commands: mpsc::Sender<Command>) {
         line.clear();
 
         match stdin.read_line(&mut line) {
-            Ok(0) => return,
+            Ok(0) => return Ok(()),
             Err(e) => {
                 eprintln!("Failed to read from stdin: {e}");
                 sleep(Duration::from_secs(1));
@@ -90,10 +90,10 @@ pub fn command_listener(incoming_commands: mpsc::Sender<Command>) {
             Ok(command) => {
                 if incoming_commands.blocking_send(command).is_err() {
                     // Shutdown in progress.
-                    return;
+                    return Ok(());
                 }
             }
-            Err(err) => err.print().unwrap(),
+            Err(err) => err.print()?,
         }
     }
 }
