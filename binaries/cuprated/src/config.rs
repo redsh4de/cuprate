@@ -9,7 +9,7 @@ use std::{
     time::Duration,
 };
 
-use anyhow::bail;
+use anyhow::{bail, Context};
 use clap::Parser;
 use serde::{Deserialize, Serialize};
 
@@ -76,7 +76,7 @@ const HEADER: &str = r"##     ____                      _
 ///
 /// # Errors
 ///
-/// Returns an error if a user-specified config file cannot be read or parsed.
+/// Returns an error if a config file cannot be read or parsed.
 pub fn read_config_and_args() -> Result<Config, anyhow::Error> {
     let args = args::Args::parse();
     args.do_quick_requests();
@@ -86,24 +86,44 @@ pub fn read_config_and_args() -> Result<Config, anyhow::Error> {
         Config::read_from_path(config_file)?
     } else {
         // First attempt to read the config file from the current directory.
-        std::env::current_dir()
-            .map(|path| path.join(DEFAULT_CONFIG_FILE_NAME))
-            .map_err(Into::into)
-            .and_then(Config::read_from_path)
-            .inspect_err(|e| tracing::debug!("Failed to read config from current dir: {e}"))
-            // otherwise try the main config directory.
-            .or_else(|_| {
-                let file = CUPRATE_CONFIG_DIR.join(DEFAULT_CONFIG_FILE_NAME);
-                Config::read_from_path(file)
-            })
-            .inspect_err(|e| {
-                tracing::debug!("Failed to read config from config dir: {e}");
-                if !args.skip_config_warning {
-                    eprintln_red(DEFAULT_CONFIG_WARNING);
-                    std::thread::sleep(DEFAULT_CONFIG_STARTUP_DELAY);
+        // Otherwise try the main config directory.
+        let mut paths = vec![(
+            "config dir",
+            CUPRATE_CONFIG_DIR.join(DEFAULT_CONFIG_FILE_NAME),
+        )];
+        if let Ok(cwd) = std::env::current_dir() {
+            paths.insert(0, ("current dir", cwd.join(DEFAULT_CONFIG_FILE_NAME)));
+        }
+
+        let mut config = None;
+        for (source, path) in &paths {
+            match Config::read_from_path(path) {
+                Ok(c) => {
+                    config = Some(c);
+                    break;
                 }
-            })
-            .unwrap_or_default()
+                Err(e) => {
+                    tracing::debug!("Failed to read config from {source}: {e}");
+                    let is_not_found = e
+                        .downcast_ref::<io::Error>()
+                        .is_some_and(|e| e.kind() == io::ErrorKind::NotFound);
+
+                    if !is_not_found {
+                        return Err(e.context(format!("failed to parse {}", path.display())));
+                    }
+                }
+            }
+        }
+
+        if let Some(config) = config {
+            config
+        } else {
+            if !args.skip_config_warning {
+                eprintln_red(DEFAULT_CONFIG_WARNING);
+                std::thread::sleep(DEFAULT_CONFIG_STARTUP_DELAY);
+            }
+            Config::default()
+        }
     };
 
     let config = args.apply_args(config);
