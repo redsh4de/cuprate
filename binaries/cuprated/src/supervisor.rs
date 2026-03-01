@@ -31,27 +31,25 @@ impl ShutdownHandle {
         self.token.cancelled().await;
     }
 
-    /// Trigger a graceful shutdown.
-    pub fn trigger_shutdown(&self) {
+    /// Trigger a graceful shutdown with the given exit code.
+    pub fn trigger_shutdown(&self, exit_code: u8) {
         if !self.token.is_cancelled() {
+            #[expect(clippy::let_underscore_must_use)]
+            let _ =
+                self.exit_code
+                    .compare_exchange(0, exit_code, Ordering::Relaxed, Ordering::Relaxed);
             info!("Shutting down gracefully... Press Ctrl+C to exit immediately.");
         }
         self.token.cancel();
     }
 
-    /// Log a fatal error, set exit code, and trigger shutdown.
-    fn fatal(&self, error: &impl std::fmt::Display) {
+    /// Report a service error and trigger a shutdown.
+    pub fn report_service_error(&self, error: impl std::fmt::Display) {
         if self.token.is_cancelled() {
             return;
         }
         tracing::error!("{error}");
-        self.exit_code.store(1, Ordering::Relaxed);
-        self.trigger_shutdown();
-    }
-
-    /// Report a service error and trigger a shutdown.
-    pub fn report_service_error(&self, error: impl std::fmt::Display) {
-        self.fatal(&error);
+        self.trigger_shutdown(1);
     }
 }
 
@@ -82,7 +80,7 @@ impl CupratedTask {
         self.task_tracker.spawn(async move {
             let result = fut.await;
             if let Err(ref e) = result {
-                handle.fatal(e);
+                handle.report_service_error(e);
             }
             on_shutdown();
             result
@@ -115,17 +113,22 @@ pub fn new() -> (CupratedSupervisor, CupratedTask) {
 /// Spawn a task that listens for OS signals and initiates shutdown.
 pub fn spawn_signal_handler(handle: ShutdownHandle) {
     tokio::spawn(async move {
-        shutdown_signal().await;
+        tokio::select! {
+            biased;
+            () = handle.cancelled() => {}
+            signal = shutdown_signal() => {
+                eprintln!();
+                handle.trigger_shutdown(signal);
+            }
+        }
+        let second_signal = shutdown_signal().await;
         eprintln!();
-        handle.trigger_shutdown();
-        shutdown_signal().await;
-        eprintln!();
-        std::process::exit(1);
+        std::process::exit(i32::from(second_signal));
     });
 }
 
 /// Wait for an OS shutdown signal (SIGINT or SIGTERM).
-async fn shutdown_signal() {
+async fn shutdown_signal() -> u8 {
     let ctrl_c = async {
         tokio::signal::ctrl_c()
             .await
@@ -144,7 +147,7 @@ async fn shutdown_signal() {
     let terminate = std::future::pending::<()>();
 
     tokio::select! {
-        () = ctrl_c => {}
-        () = terminate => {}
+        () = ctrl_c => 130,
+        () = terminate => 143,
     }
 }

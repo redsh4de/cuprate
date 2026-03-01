@@ -157,7 +157,7 @@ pub async fn io_loop(
                 }
             }
             Command::Exit => {
-                shutdown_handle.trigger_shutdown();
+                shutdown_handle.trigger_shutdown(0);
                 break;
             }
         }

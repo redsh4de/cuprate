@@ -572,7 +572,7 @@ async fn stop_daemon(
     mut state: CupratedRpcHandler,
     _: StopDaemonRequest,
 ) -> Result<StopDaemonResponse, Error> {
-    state.shutdown_handle.trigger_shutdown();
+    state.shutdown_handle.trigger_shutdown(0);
     Ok(StopDaemonResponse { status: Status::Ok })
 }
 
