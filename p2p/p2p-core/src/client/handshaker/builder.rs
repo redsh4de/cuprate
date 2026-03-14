@@ -1,15 +1,16 @@
 use std::{convert::Infallible, marker::PhantomData};
 
 use futures::{stream, Stream};
+use tokio::sync::mpsc;
 use tower::{make::Shared, util::MapErr};
 use tracing::Span;
 
 use cuprate_wire::BasicNodeData;
 
 use crate::{
-    client::{handshaker::HandShaker, InternalPeerID, PeerSyncCallback},
+    client::{handshaker::HandShaker, InternalPeerID},
     AddressBook, BroadcastMessage, CoreSyncSvc, NetworkZone, ProtocolRequestHandlerMaker,
-    Transport,
+    SyncEvent, Transport,
 };
 
 mod dummy;
@@ -46,9 +47,8 @@ pub struct HandshakerBuilder<
     broadcast_stream_maker: BrdcstStrmMkr,
     /// The [`Span`] that will set as the parent to the connection [`Span`].
     connection_parent_span: Option<Span>,
-
-    /// Called with a peer's [`CoreSyncData`].
-    on_peer_sync: Option<PeerSyncCallback>,
+    /// A channel to notify on peer sync events.
+    sync_event_tx: Option<mpsc::Sender<SyncEvent>>,
 
     /// Transport method client configuration to use.
     transport_client_config: T::ClientConfig,
@@ -72,7 +72,7 @@ impl<N: NetworkZone, T: Transport<N>> HandshakerBuilder<N, T> {
             our_basic_node_data,
             broadcast_stream_maker: |_| stream::pending(),
             connection_parent_span: None,
-            on_peer_sync: None,
+            sync_event_tx: None,
             transport_client_config,
             _zone: PhantomData,
         }
@@ -103,7 +103,7 @@ impl<N: NetworkZone, T: Transport<N>, AdrBook, CSync, ProtoHdlr, BrdcstStrmMkr>
             our_basic_node_data,
             broadcast_stream_maker,
             connection_parent_span,
-            on_peer_sync,
+            sync_event_tx,
             transport_client_config,
             ..
         } = self;
@@ -115,7 +115,7 @@ impl<N: NetworkZone, T: Transport<N>, AdrBook, CSync, ProtoHdlr, BrdcstStrmMkr>
             our_basic_node_data,
             broadcast_stream_maker,
             connection_parent_span,
-            on_peer_sync,
+            sync_event_tx,
             transport_client_config,
             _zone: PhantomData,
         }
@@ -147,7 +147,7 @@ impl<N: NetworkZone, T: Transport<N>, AdrBook, CSync, ProtoHdlr, BrdcstStrmMkr>
             our_basic_node_data,
             broadcast_stream_maker,
             connection_parent_span,
-            on_peer_sync,
+            sync_event_tx,
             transport_client_config,
             ..
         } = self;
@@ -159,7 +159,7 @@ impl<N: NetworkZone, T: Transport<N>, AdrBook, CSync, ProtoHdlr, BrdcstStrmMkr>
             our_basic_node_data,
             broadcast_stream_maker,
             connection_parent_span,
-            on_peer_sync,
+            sync_event_tx,
             transport_client_config,
             _zone: PhantomData,
         }
@@ -186,7 +186,7 @@ impl<N: NetworkZone, T: Transport<N>, AdrBook, CSync, ProtoHdlr, BrdcstStrmMkr>
             our_basic_node_data,
             broadcast_stream_maker,
             connection_parent_span,
-            on_peer_sync,
+            sync_event_tx,
             transport_client_config,
             ..
         } = self;
@@ -198,7 +198,7 @@ impl<N: NetworkZone, T: Transport<N>, AdrBook, CSync, ProtoHdlr, BrdcstStrmMkr>
             our_basic_node_data,
             broadcast_stream_maker,
             connection_parent_span,
-            on_peer_sync,
+            sync_event_tx,
             transport_client_config,
             _zone: PhantomData,
         }
@@ -225,7 +225,7 @@ impl<N: NetworkZone, T: Transport<N>, AdrBook, CSync, ProtoHdlr, BrdcstStrmMkr>
             protocol_request_svc_maker,
             our_basic_node_data,
             connection_parent_span,
-            on_peer_sync,
+            sync_event_tx,
             transport_client_config,
             ..
         } = self;
@@ -237,21 +237,21 @@ impl<N: NetworkZone, T: Transport<N>, AdrBook, CSync, ProtoHdlr, BrdcstStrmMkr>
             our_basic_node_data,
             broadcast_stream_maker: new_broadcast_stream_maker,
             connection_parent_span,
-            on_peer_sync,
+            sync_event_tx,
             transport_client_config,
             _zone: PhantomData,
         }
     }
 
-    /// Sets the callback invoked with a peer's [`CoreSyncData`](cuprate_wire::CoreSyncData).
+    /// Changes the sync event channel, which receives peer chain state updates.
     ///
     /// ## Default
     ///
-    /// No callback is set by default.
+    /// The default sync event channel will be `None`.
     #[must_use]
-    pub fn with_peer_sync_callback(self, on_peer_sync: PeerSyncCallback) -> Self {
+    pub fn with_sync_event_tx(self, sync_event_tx: mpsc::Sender<SyncEvent>) -> Self {
         Self {
-            on_peer_sync: Some(on_peer_sync),
+            sync_event_tx: Some(sync_event_tx),
             ..self
         }
     }
@@ -278,7 +278,7 @@ impl<N: NetworkZone, T: Transport<N>, AdrBook, CSync, ProtoHdlr, BrdcstStrmMkr>
             self.broadcast_stream_maker,
             self.our_basic_node_data,
             self.connection_parent_span.unwrap_or(Span::none()),
-            self.on_peer_sync,
+            self.sync_event_tx,
             self.transport_client_config,
         )
     }

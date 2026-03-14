@@ -34,7 +34,6 @@ use crate::{
     client::{
         connection::Connection, request_handler::PeerRequestHandler,
         timeout_monitor::connection_timeout_monitor_task, Client, InternalPeerID, PeerInformation,
-        PeerSyncCallback,
     },
     constants::{
         CLIENT_QUEUE_SIZE, HANDSHAKE_TIMEOUT, MAX_EAGER_PROTOCOL_MESSAGES,
@@ -43,7 +42,7 @@ use crate::{
     handles::HandleBuilder,
     AddressBook, AddressBookRequest, AddressBookResponse, BroadcastMessage, ConnectionDirection,
     CoreSyncDataRequest, CoreSyncDataResponse, CoreSyncSvc, NetZoneAddress, NetworkZone,
-    ProtocolRequestHandlerMaker, SharedError, Transport,
+    ProtocolRequestHandlerMaker, SharedError, SyncEvent, Transport,
 };
 
 pub mod builder;
@@ -104,8 +103,8 @@ pub struct HandShaker<Z: NetworkZone, T: Transport<Z>, AdrBook, CSync, ProtoHdlr
 
     connection_parent_span: Span,
 
-    /// Called with a peer's [`CoreSyncData`].
-    on_peer_sync: Option<PeerSyncCallback>,
+    /// A channel to notify when a peer's [`CoreSyncData`] is received.
+    sync_event_tx: Option<mpsc::Sender<SyncEvent>>,
 
     /// Client configuration used by the handshaker for this transport
     transport_client_config: T::ClientConfig,
@@ -126,7 +125,7 @@ impl<Z: NetworkZone, T: Transport<Z>, AdrBook, CSync, ProtoHdlrMkr, BrdcstStrmMk
         broadcast_stream_maker: BrdcstStrmMkr,
         our_basic_node_data: BasicNodeData,
         connection_parent_span: Span,
-        on_peer_sync: Option<PeerSyncCallback>,
+        sync_event_tx: Option<mpsc::Sender<SyncEvent>>,
         transport_client_config: T::ClientConfig,
     ) -> Self {
         Self {
@@ -136,7 +135,7 @@ impl<Z: NetworkZone, T: Transport<Z>, AdrBook, CSync, ProtoHdlrMkr, BrdcstStrmMk
             broadcast_stream_maker,
             our_basic_node_data,
             connection_parent_span,
-            on_peer_sync,
+            sync_event_tx,
             transport_client_config,
             _zone: PhantomData,
         }
@@ -177,7 +176,7 @@ where
         let our_basic_node_data = self.our_basic_node_data.clone();
 
         let connection_parent_span = self.connection_parent_span.clone();
-        let on_peer_sync = self.on_peer_sync.clone();
+        let sync_event_tx = self.sync_event_tx.clone();
 
         let transport_client_config = self.transport_client_config.clone();
 
@@ -195,7 +194,7 @@ where
                     protocol_request_svc_maker,
                     our_basic_node_data,
                     connection_parent_span,
-                    on_peer_sync,
+                    sync_event_tx,
                 ),
             )
             .await?
@@ -271,7 +270,7 @@ async fn handshake<
     mut protocol_request_svc_maker: ProtoHdlrMkr,
     our_basic_node_data: BasicNodeData,
     connection_parent_span: Span,
-    on_peer_sync: Option<PeerSyncCallback>,
+    sync_event_tx: Option<mpsc::Sender<SyncEvent>>,
 ) -> Result<Client<Z>, HandshakeError>
 where
     AdrBook: AddressBook<Z> + Clone,
@@ -513,7 +512,7 @@ where
         protocol_request_handler,
         our_basic_node_data,
         peer_info: info.clone(),
-        on_peer_sync: on_peer_sync.clone(),
+        sync_event_tx: sync_event_tx.clone(),
     };
 
     let connection = Connection::<Z, T, _, _, _, _>::new(
@@ -541,7 +540,7 @@ where
         Arc::clone(&semaphore),
         address_book,
         core_sync_svc,
-        on_peer_sync,
+        sync_event_tx,
     ));
 
     let client = Client::<Z>::new(

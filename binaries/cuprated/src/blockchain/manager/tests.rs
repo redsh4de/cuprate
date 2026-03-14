@@ -117,6 +117,7 @@ async fn simple_reorg() {
             block: block_1.clone(),
             prepped_txs: HashMap::new(),
             response_tx: oneshot::channel().0,
+            inflight_guard: None,
         })
         .await;
 
@@ -125,6 +126,7 @@ async fn simple_reorg() {
             block: block_1,
             prepped_txs: HashMap::new(),
             response_tx: oneshot::channel().0,
+            inflight_guard: None,
         })
         .await;
 
@@ -142,6 +144,7 @@ async fn simple_reorg() {
             block: block_2a,
             prepped_txs: HashMap::new(),
             response_tx: oneshot::channel().0,
+            inflight_guard: None,
         })
         .await;
 
@@ -150,6 +153,7 @@ async fn simple_reorg() {
             block: block_2b.clone(),
             prepped_txs: HashMap::new(),
             response_tx: oneshot::channel().0,
+            inflight_guard: None,
         })
         .await;
 
@@ -169,6 +173,7 @@ async fn simple_reorg() {
             block: block_2b,
             prepped_txs: HashMap::new(),
             response_tx: oneshot::channel().0,
+            inflight_guard: None,
         })
         .await;
     // make sure this didn't change the context
@@ -185,6 +190,7 @@ async fn simple_reorg() {
             block: block_3.clone(),
             prepped_txs: HashMap::new(),
             response_tx: oneshot::channel().0,
+            inflight_guard: None,
         })
         .await;
 
@@ -193,6 +199,7 @@ async fn simple_reorg() {
             block: block_3,
             prepped_txs: HashMap::new(),
             response_tx: oneshot::channel().0,
+            inflight_guard: None,
         })
         .await;
 
@@ -343,6 +350,7 @@ async fn recover_bad_reorg() {
             block: block_1,
             prepped_txs: HashMap::new(),
             response_tx: oneshot::channel().0,
+            inflight_guard: None,
         })
         .await;
 
@@ -358,6 +366,7 @@ async fn recover_bad_reorg() {
             block: block_2,
             prepped_txs: HashMap::new(),
             response_tx: oneshot::channel().0,
+            inflight_guard: None,
         })
         .await;
 
@@ -375,6 +384,7 @@ async fn recover_bad_reorg() {
             block: block_1_alt.clone(),
             prepped_txs: HashMap::new(),
             response_tx: oneshot::channel().0,
+            inflight_guard: None,
         })
         .await;
 
@@ -408,6 +418,7 @@ async fn recover_bad_reorg() {
             block: block_2_alt.clone(),
             prepped_txs: HashMap::from([(tx.tx_hash, tx)]),
             response_tx: oneshot::channel().0,
+            inflight_guard: None,
         })
         .await;
 
@@ -424,6 +435,7 @@ async fn recover_bad_reorg() {
             block: block_3_alt,
             prepped_txs: HashMap::new(),
             response_tx: oneshot::channel().0,
+            inflight_guard: None,
         })
         .await;
 

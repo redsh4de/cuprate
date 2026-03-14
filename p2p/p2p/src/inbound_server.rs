@@ -14,9 +14,9 @@ use tower::{Service, ServiceExt};
 use tracing::{instrument, Instrument, Span};
 
 use cuprate_p2p_core::{
-    client::{Client, DoHandshakeRequest, HandshakeError, InternalPeerID, PeerSyncCallback},
+    client::{Client, DoHandshakeRequest, HandshakeError, InternalPeerID},
     services::{AddressBookRequest, AddressBookResponse},
-    AddressBook, ConnectionDirection, NetworkZone, Transport,
+    AddressBook, ConnectionDirection, NetworkZone, SyncEvent, Transport,
 };
 use cuprate_wire::{
     admin::{PingResponse, PING_OK_RESPONSE_STATUS_TEXT},
@@ -41,7 +41,7 @@ pub(super) async fn inbound_server<Z, T, HS, A>(
     config: P2PConfig<Z>,
     transport_config: Option<T::ServerConfig>,
     inbound_semaphore: Arc<Semaphore>,
-    peer_sync_callback: Option<PeerSyncCallback>,
+    sync_event_tx: Option<mpsc::Sender<SyncEvent>>,
 ) -> Result<(), tower::BoxError>
 where
     Z: NetworkZone,
@@ -115,7 +115,7 @@ where
             });
 
             let new_connection_tx = new_connection_tx.clone();
-            let peer_sync_callback = peer_sync_callback.clone();
+            let sync_event_tx = sync_event_tx.clone();
 
             tokio::spawn(
                 async move {
@@ -125,8 +125,8 @@ where
                         Ok(Ok(peer)) => {
                             let csd = peer.info.core_sync_data.lock().unwrap().clone();
                             if new_connection_tx.send(peer).await.is_ok() {
-                                if let Some(ref peer_sync_callback) = peer_sync_callback {
-                                    peer_sync_callback.call(&csd);
+                                if let Some(ref sync_event_tx) = sync_event_tx {
+                                    sync_event_tx.try_send(SyncEvent::NewState(csd)).ok();
                                 }
                             }
                         }

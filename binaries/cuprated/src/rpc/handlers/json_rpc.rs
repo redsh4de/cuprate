@@ -242,6 +242,7 @@ async fn submit_block(
         HashMap::new(), // this function reads the txpool
         &mut state.blockchain_read,
         &mut state.txpool_read,
+        None,
     )
     .await?;
 

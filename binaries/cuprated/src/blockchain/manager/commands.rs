@@ -6,6 +6,8 @@ use tokio::sync::oneshot;
 
 use cuprate_types::TransactionVerificationData;
 
+use crate::blockchain::interface::InFlightFluffyBlockGuard;
+
 /// The blockchain manager commands.
 #[expect(clippy::large_enum_variant)]
 pub enum BlockchainManagerCommand {
@@ -17,6 +19,10 @@ pub enum BlockchainManagerCommand {
         prepped_txs: HashMap<[u8; 32], TransactionVerificationData>,
         /// The channel to send the response down.
         response_tx: oneshot::Sender<Result<IncomingBlockOk, anyhow::Error>>,
+        /// Holds the inflight fluffy block count until the manager finishes processing.
+        ///
+        /// `None` for blocks submitted via RPC.
+        inflight_guard: Option<InFlightFluffyBlockGuard>,
     },
     /// Pop blocks from the top of the blockchain.
     PopBlocks {
