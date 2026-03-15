@@ -1,6 +1,5 @@
 use futures::TryFutureExt;
 use rand::{thread_rng, Rng};
-use tokio::sync::mpsc;
 use tower::ServiceExt;
 
 use cuprate_pruning::PruningSeed;
@@ -13,14 +12,13 @@ use cuprate_wire::{
 };
 
 use crate::{
-    client::PeerInformation,
+    client::{PeerInformation, PeerSyncCallback},
     constants::MAX_PEERS_IN_PEER_LIST_MESSAGE,
     services::{
         AddressBookRequest, AddressBookResponse, CoreSyncDataRequest, CoreSyncDataResponse,
         ZoneSpecificPeerListEntryBase,
     },
     AddressBook, CoreSyncSvc, NetworkZone, PeerRequest, PeerResponse, ProtocolRequestHandler,
-    SyncEvent,
 };
 
 #[derive(thiserror::Error, Debug, Copy, Clone, Eq, PartialEq)]
@@ -46,8 +44,8 @@ pub(crate) struct PeerRequestHandler<Z: NetworkZone, A, CS, PR> {
     /// The information on the connected peer.
     pub peer_info: PeerInformation<Z::Addr>,
 
-    /// Sends sync events to the syncer.
-    pub sync_event_tx: Option<mpsc::Sender<SyncEvent>>,
+    /// Called with a peer's [`CoreSyncData`].
+    pub on_peer_sync: Option<PeerSyncCallback>,
 }
 
 impl<Z, A, CS, PR> PeerRequestHandler<Z, A, CS, PR>
@@ -107,11 +105,10 @@ where
     ) -> Result<TimedSyncResponse, tower::BoxError> {
         // TODO: add a limit on the amount of these requests in a certain time period.
 
-        let csd = req.payload_data;
-        *self.peer_info.core_sync_data.lock().unwrap() = csd.clone();
+        *self.peer_info.core_sync_data.lock().unwrap() = req.payload_data.clone();
 
-        if let Some(sync_event_tx) = &self.sync_event_tx {
-            sync_event_tx.try_send(SyncEvent::NewState(csd)).ok();
+        if let Some(on_peer_sync) = &self.on_peer_sync {
+            on_peer_sync.call(&req.payload_data);
         }
 
         // Fetch core sync data.

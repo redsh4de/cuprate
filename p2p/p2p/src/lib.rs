@@ -16,8 +16,9 @@ use tracing::{instrument, Instrument, Span};
 use cuprate_async_buffer::BufferStream;
 use cuprate_p2p_core::{
     client::Connector,
+    client::PeerSyncCallback,
     services::{AddressBookRequest, AddressBookResponse},
-    CoreSyncSvc, NetworkZone, ProtocolRequestHandlerMaker, SyncEvent, Transport,
+    CoreSyncSvc, NetworkZone, ProtocolRequestHandlerMaker, Transport,
 };
 
 pub mod block_downloader;
@@ -83,7 +84,7 @@ pub async fn initialize_network<Z, T, PR, CS>(
     core_sync_svc: CS,
     config: P2PConfig<Z>,
     transport_config: TransportConfig<Z, T>,
-    sync_event_tx: Option<mpsc::Sender<SyncEvent>>,
+    peer_sync_callback: Option<PeerSyncCallback>,
 ) -> Result<NetworkInterface<Z>, tower::BoxError>
 where
     Z: NetworkZone,
@@ -124,8 +125,9 @@ where
         .with_broadcast_stream_maker(outbound_mkr)
         .with_connection_parent_span(Span::current());
 
-    if let Some(tx) = sync_event_tx.clone() {
-        outbound_handshaker_builder = outbound_handshaker_builder.with_sync_event_tx(tx);
+    if let Some(ref cb) = peer_sync_callback {
+        outbound_handshaker_builder =
+            outbound_handshaker_builder.with_peer_sync_callback(cb.clone());
     }
 
     let inbound_handshaker = outbound_handshaker_builder
@@ -150,7 +152,7 @@ where
         make_connection_rx,
         address_book.clone(),
         outbound_connector,
-        sync_event_tx.clone(),
+        peer_sync_callback.clone(),
     );
 
     let peer_set = PeerSet::new(new_connection_rx);
@@ -184,7 +186,7 @@ where
             config,
             transport_config.server_config,
             inbound_semaphore,
-            sync_event_tx,
+            peer_sync_callback,
         )
         .map(|res| {
             if let Err(e) = res {

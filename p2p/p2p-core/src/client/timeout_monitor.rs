@@ -15,10 +15,10 @@ use tracing::instrument;
 use cuprate_wire::{admin::TimedSyncRequest, AdminRequestMessage, AdminResponseMessage};
 
 use crate::{
-    client::{connection::ConnectionTaskRequest, PeerInformation},
+    client::{connection::ConnectionTaskRequest, PeerInformation, PeerSyncCallback},
     constants::{MAX_PEERS_IN_PEER_LIST_MESSAGE, TIMEOUT_INTERVAL},
     services::{AddressBookRequest, CoreSyncDataRequest, CoreSyncDataResponse},
-    AddressBook, CoreSyncSvc, NetworkZone, PeerRequest, PeerResponse, SyncEvent,
+    AddressBook, CoreSyncSvc, NetworkZone, PeerRequest, PeerResponse,
 };
 
 /// The timeout monitor task, this task will send periodic timed sync requests to the peer to make sure it is still active.
@@ -36,7 +36,7 @@ pub(super) async fn connection_timeout_monitor_task<N: NetworkZone, AdrBook, CSy
 
     mut address_book_svc: AdrBook,
     mut core_sync_svc: CSync,
-    sync_event_tx: Option<mpsc::Sender<SyncEvent>>,
+    on_peer_sync: Option<PeerSyncCallback>,
 ) -> Result<(), tower::BoxError>
 where
     AdrBook: AddressBook<N>,
@@ -129,11 +129,10 @@ where
             ))
             .await?;
 
-        let csd = timed_sync.payload_data;
-        *peer_information.core_sync_data.lock().unwrap() = csd.clone();
+        *peer_information.core_sync_data.lock().unwrap() = timed_sync.payload_data.clone();
 
-        if let Some(sync_event_tx) = &sync_event_tx {
-            sync_event_tx.try_send(SyncEvent::NewState(csd)).ok();
+        if let Some(on_peer_sync) = &on_peer_sync {
+            on_peer_sync.call(&timed_sync.payload_data);
         }
     }
 }

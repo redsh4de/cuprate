@@ -94,15 +94,6 @@ use services::*;
 pub use cuprate_helper::network::Network;
 pub use cuprate_wire::CoreSyncData;
 
-/// An event sent to the syncer to trigger a sync status re-check.
-#[derive(Debug, Clone)]
-pub enum SyncEvent {
-    /// A peer reported new chain state.
-    NewState(CoreSyncData),
-    /// An unconditional wake.
-    Wake,
-}
-
 /// The direction of a connection.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum ConnectionDirection {

@@ -8,7 +8,7 @@ use std::{
 };
 
 use monero_oxide::{block::Block, transaction::Transaction};
-use tokio::sync::{mpsc, oneshot, watch};
+use tokio::sync::{mpsc, oneshot};
 use tower::{Service, ServiceExt};
 
 use cuprate_blockchain::service::BlockchainReadHandle;
@@ -41,47 +41,9 @@ pub(super) static COMMAND_TX: OnceLock<mpsc::Sender<BlockchainManagerCommand>> =
 static BLOCKS_BEING_HANDLED: LazyLock<Mutex<HashSet<[u8; 32]>>> =
     LazyLock::new(|| Mutex::new(HashSet::new()));
 
-/// Tracks the number of fluffy blocks currently being processed.
-///
-/// The syncer expects this to be zero on check before starting the block downloader.
-/// Guards are transferred into [`BlockchainManagerCommand::AddBlock`] so they
-/// outlive the connection layer's 10-second request handler timeout.
-static INFLIGHT_FLUFFY_BLOCKS: LazyLock<(watch::Sender<usize>, watch::Receiver<usize>)> =
-    LazyLock::new(|| watch::channel(0));
-
 /// Returns `true` if the given block hash is currently being handled.
 pub fn is_block_being_handled(hash: &[u8; 32]) -> bool {
     BLOCKS_BEING_HANDLED.lock().unwrap().contains(hash)
-}
-
-/// If any fluffy blocks are in-flight, waits for them all to finish and returns `true`.
-/// Returns `false` immediately if none are in-flight.
-pub async fn wait_for_inflight_fluffy_blocks() -> bool {
-    let mut rx = INFLIGHT_FLUFFY_BLOCKS.1.clone();
-    if *rx.borrow_and_update() == 0 {
-        return false;
-    }
-    rx.wait_for(|&n| n == 0).await.ok();
-    true
-}
-
-/// RAII guard that decrements the inflight fluffy block count when dropped.
-pub struct InFlightFluffyBlockGuard;
-
-/// Increments the inflight fluffy block count.
-///
-/// Returns a guard that decrements the count when dropped.
-pub fn track_inflight_fluffy_block() -> InFlightFluffyBlockGuard {
-    INFLIGHT_FLUFFY_BLOCKS.0.send_modify(|n| *n += 1);
-    InFlightFluffyBlockGuard
-}
-
-impl Drop for InFlightFluffyBlockGuard {
-    fn drop(&mut self) {
-        INFLIGHT_FLUFFY_BLOCKS
-            .0
-            .send_modify(|n| *n = n.saturating_sub(1));
-    }
 }
 
 /// An error that can be returned from [`handle_incoming_block`].
@@ -115,7 +77,6 @@ pub async fn handle_incoming_block(
     mut given_txs: HashMap<[u8; 32], Transaction>,
     blockchain_read_handle: &mut BlockchainReadHandle,
     txpool_read_handle: &mut TxpoolReadHandle,
-    inflight_guard: Option<InFlightFluffyBlockGuard>,
 ) -> Result<IncomingBlockOk, IncomingBlockError> {
     if given_txs.len() > block.transactions.len() {
         return Err(IncomingBlockError::InvalidBlock(anyhow::anyhow!(
@@ -204,7 +165,6 @@ pub async fn handle_incoming_block(
             block,
             prepped_txs: txs,
             response_tx,
-            inflight_guard,
         })
         .await
         .expect("TODO: don't actually panic here, an err means we are shutting down");

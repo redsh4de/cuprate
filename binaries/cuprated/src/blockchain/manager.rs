@@ -15,7 +15,7 @@ use cuprate_p2p::{
     block_downloader::{BlockBatch, BlockDownloaderConfig},
     BroadcastSvc, NetworkInterface,
 };
-use cuprate_p2p_core::{ClearNet, SyncEvent};
+use cuprate_p2p_core::ClearNet;
 use cuprate_txpool::service::TxpoolWriteHandle;
 use cuprate_types::{
     blockchain::{BlockchainReadRequest, BlockchainResponse},
@@ -38,6 +38,7 @@ mod handler;
 mod tests;
 
 pub use commands::{BlockchainManagerCommand, IncomingBlockOk};
+use syncer::SyncerHandle;
 
 /// Initialize the blockchain manager.
 ///
@@ -50,32 +51,24 @@ pub async fn init_blockchain_manager(
     txpool_manager_handle: TxpoolManagerHandle,
     mut blockchain_context_service: BlockchainContextService,
     block_downloader_config: BlockDownloaderConfig,
-    sync_event_rx: mpsc::Receiver<SyncEvent>,
-) -> Arc<Notify> {
+    syncer_handle: SyncerHandle,
+) {
     // TODO: find good values for these size limits
     let (batch_tx, batch_rx) = mpsc::channel(1);
     let stop_current_block_downloader = Arc::new(Notify::new());
     let (command_tx, command_rx) = mpsc::channel(3);
 
-    let synced_notify = Arc::new(Notify::new());
-
     COMMAND_TX.set(command_tx).unwrap();
 
-    tokio::spawn(
-        syncer::Syncer {
-            context_svc: blockchain_context_service.clone(),
-            clearnet_interface: clearnet_interface.clone(),
-            synced_notify: Arc::clone(&synced_notify),
-            sync_event_rx,
-            synced: false,
-        }
-        .run(
-            ChainService(blockchain_read_handle.clone()),
-            batch_tx,
-            Arc::clone(&stop_current_block_downloader),
-            block_downloader_config,
-        ),
-    );
+    tokio::spawn(syncer::syncer(
+        blockchain_context_service.clone(),
+        ChainService(blockchain_read_handle.clone()),
+        clearnet_interface.clone(),
+        batch_tx,
+        Arc::clone(&stop_current_block_downloader),
+        block_downloader_config,
+        syncer_handle,
+    ));
 
     let manager = BlockchainManager {
         blockchain_write_handle,
@@ -90,8 +83,6 @@ pub async fn init_blockchain_manager(
     };
 
     tokio::spawn(manager.run(batch_rx, command_rx));
-
-    synced_notify
 }
 
 /// The blockchain manager.

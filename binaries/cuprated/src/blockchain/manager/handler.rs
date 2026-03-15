@@ -50,11 +50,9 @@ impl super::BlockchainManager {
                 block,
                 prepped_txs,
                 response_tx,
-                inflight_guard,
             } => {
                 let res = self.handle_incoming_block(block, prepped_txs).await;
 
-                drop(inflight_guard);
                 drop(response_tx.send(res));
             }
             BlockchainManagerCommand::PopBlocks {
