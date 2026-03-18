@@ -20,6 +20,7 @@
 )]
 
 use std::io::{self, IsTerminal};
+use std::process::ExitCode;
 use std::{thread::sleep, time::Duration};
 
 use clap::Parser;
@@ -32,7 +33,17 @@ use cuprated::{
     logging::eprintln_red,
 };
 
-fn main() {
+fn main() -> ExitCode {
+    match main_inner() {
+        Ok(code) => code,
+        Err(e) => {
+            eprintln_red(&format!("{e:#}"));
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn main_inner() -> anyhow::Result<ExitCode> {
     // Set global private permissions for created files.
     cuprate_helper::fs::set_private_global_file_permissions();
 
@@ -43,7 +54,7 @@ fn main() {
     let args = Args::parse();
     args.do_quick_requests();
 
-    let config = load_config(&args);
+    let config = load_config(&args)?;
 
     // Initialize logging.
     cuprated::logging::init_logging(&config);
@@ -52,18 +63,12 @@ fn main() {
     info!("{config}");
 
     // Initialize thread pools.
-    init_global_rayon_pool(&config);
-    let rt = init_tokio_rt(&config);
+    init_global_rayon_pool(&config)?;
+    let rt = init_tokio_rt(&config)?;
 
-    rt.block_on(async move {
+    let has_failed = rt.block_on(async {
         // Start the node.
-        let node = match cuprated::Node::launch(config).await {
-            Ok(node) => node,
-            Err(e) => {
-                tracing::error!("Failed to launch node: {e:#}");
-                std::process::exit(1);
-            }
-        };
+        let node = cuprated::Node::launch(config).await?;
 
         // Spawn OS signal handler.
         cuprated::monitor::spawn_signal_handler(node.task_executor.clone());
@@ -72,17 +77,25 @@ fn main() {
         if io::stdin().is_terminal() {
             spawn_stdin_reader(node.command.clone());
         } else {
-            // If no STDIN, await OS exit signal.
             info!("Terminal/TTY not detected, disabling STDIN commands");
         }
 
         // Wait for shutdown signal.
         node.task_executor.cancellation_token().cancelled().await;
         node.shutdown().await;
+        let has_failed = node.task_executor.has_failed();
         drop(node);
-    });
+
+        Ok::<bool, anyhow::Error>(has_failed)
+    })?;
     drop(rt);
     info!("Shutdown complete.");
+
+    if has_failed {
+        Ok(ExitCode::FAILURE)
+    } else {
+        Ok(ExitCode::SUCCESS)
+    }
 }
 
 /// Spawn a STDIN reader that forwards commands to the [`CommandHandle`].
@@ -120,16 +133,10 @@ fn spawn_stdin_reader(command: CommandHandle) {
 
 /// Load config: explicit path from `--config-file`, auto-detect from default
 /// locations, or fall back to defaults with a warning.
-fn load_config(args: &Args) -> Config {
+fn load_config(args: &Args) -> anyhow::Result<Config> {
     let config = if let Some(config_file) = &args.config_file {
-        Config::read_from_path(config_file).unwrap_or_else(|e| {
-            eprintln_red(&format!("Failed to read config from file: {e}"));
-            std::process::exit(1);
-        })
-    } else if let Some(config) = find_config().unwrap_or_else(|e| {
-        eprintln_red(&format!("Failed to read config: {e}"));
-        std::process::exit(1);
-    }) {
+        Config::read_from_path(config_file)?
+    } else if let Some(config) = find_config()? {
         config
     } else {
         if !args.skip_config_warning {
@@ -164,24 +171,23 @@ fn load_config(args: &Args) -> Config {
         std::process::exit(0);
     }
 
-    config
+    Ok(config)
 }
 
 /// Initialize the global [`rayon`] thread-pool.
-fn init_global_rayon_pool(config: &Config) {
+fn init_global_rayon_pool(config: &Config) -> anyhow::Result<()> {
     rayon::ThreadPoolBuilder::new()
         .num_threads(config.rayon.threads)
         .thread_name(|index| format!("cuprated-rayon-{index}"))
-        .build_global()
-        .unwrap();
+        .build_global()?;
+    Ok(())
 }
 
 /// Initialize the [`tokio`] runtime.
-fn init_tokio_rt(config: &Config) -> tokio::runtime::Runtime {
-    tokio::runtime::Builder::new_multi_thread()
+fn init_tokio_rt(config: &Config) -> anyhow::Result<tokio::runtime::Runtime> {
+    Ok(tokio::runtime::Builder::new_multi_thread()
         .worker_threads(config.tokio.threads)
         .thread_name("cuprated-tokio")
         .enable_all()
-        .build()
-        .unwrap()
+        .build()?)
 }
