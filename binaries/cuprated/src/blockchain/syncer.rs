@@ -13,6 +13,8 @@ use cuprate_p2p::{
 };
 use cuprate_p2p_core::{client::PeerSyncCallback, ClearNet, CoreSyncData, NetworkZone};
 
+use tokio_util::sync::CancellationToken;
+
 use super::interface::BlockchainManagerHandle;
 
 /// An error returned from the [`syncer`].
@@ -27,6 +29,7 @@ pub enum SyncerError {
 /// The syncer tasks that makes sure we are fully synchronised with our connected peers.
 #[instrument(level = "debug", skip_all)]
 #[expect(clippy::significant_drop_tightening)]
+#[expect(clippy::too_many_arguments)]
 pub async fn syncer<CN>(
     mut context_svc: BlockchainContextService,
     our_chain: CN,
@@ -35,6 +38,7 @@ pub async fn syncer<CN>(
     stop_current_block_downloader: Arc<Notify>,
     block_downloader_config: BlockDownloaderConfig,
     mut syncer_handle: SyncerHandle,
+    shutdown_token: CancellationToken,
 ) -> Result<(), SyncerError>
 where
     CN: Service<
@@ -53,7 +57,13 @@ where
     let mut sync_permit = Arc::new(Arc::clone(&semaphore).acquire_owned().await.unwrap());
 
     loop {
-        syncer_handle.notify_syncer.notified().await;
+        tokio::select! {
+            () = shutdown_token.cancelled() => {
+                tracing::info!("Blockchain syncer shut down.");
+                return Ok(());
+            }
+            () = syncer_handle.notify_syncer.notified() => {}
+        }
 
         tracing::trace!("Checking connected peers to see if we are behind",);
 
@@ -80,6 +90,11 @@ where
 
         loop {
             tokio::select! {
+                biased;
+                () = shutdown_token.cancelled() => {
+                    tracing::info!("Blockchain syncer shut down.");
+                    return Ok(());
+                }
                 () = stop_current_block_downloader.notified() => {
                     tracing::info!("Received stop signal, stopping block downloader");
 
@@ -110,6 +125,9 @@ where
 
                     tracing::debug!("Got batch, len: {}", batch.blocks.len());
                     if incoming_block_batch_tx.send((batch, Arc::clone(&sync_permit))).await.is_err() {
+                        if shutdown_token.is_cancelled() {
+                            return Ok(());
+                        }
                         return Err(SyncerError::IncomingBlockChannelClosed);
                     }
                 }
