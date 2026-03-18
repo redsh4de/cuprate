@@ -63,7 +63,7 @@ pub async fn init_blockchain_manager(
         fast_sync_hashes: node_ctx.fast_sync_hashes,
     };
 
-    node_ctx.task_executor.spawn(syncer::syncer(
+    node_ctx.task_executor.spawn_critical(syncer::syncer(
         node_ctx.blockchain_context.clone(),
         chain_service,
         clearnet_interface.clone(),
@@ -90,7 +90,7 @@ pub async fn init_blockchain_manager(
 
     node_ctx
         .task_executor
-        .spawn(manager.run(batch_rx, command_rx, shutdown_token));
+        .spawn_critical(manager.run(batch_rx, command_rx, shutdown_token));
 }
 
 /// The blockchain manager.
