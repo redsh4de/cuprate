@@ -38,7 +38,6 @@ pub mod commands;
 pub mod config;
 pub mod constants;
 pub mod logging;
-pub mod statics;
 pub mod version;
 
 mod p2p;
@@ -107,6 +106,12 @@ pub struct NodeContext {
 
     /// Sync state notifications.
     pub sync: SyncState,
+
+    /// The time this node was launched.
+    pub start_instant: std::time::SystemTime,
+
+    /// The time this node was launched as a UNIX timestamp.
+    pub start_instant_unix: u64,
 }
 
 /// An active `cuprated` node.
@@ -158,9 +163,6 @@ impl Node {
     /// Panics if the database is corrupt, critical services fail to start, or
     /// `config.target_max_memory` is unresolved.
     pub async fn launch(config: Config) -> Self {
-        // Initialize global static `LazyLock` data.
-        statics::init_lazylock_statics();
-
         let fast_sync_hashes = blockchain::get_fast_sync_hashes(config.fast_sync, config.network());
 
         // Initialize the database thread pool.
@@ -225,6 +227,7 @@ impl Node {
         let (blockchain_manager_handle, blockchain_manager_rx) = BlockchainManagerHandle::new();
 
         // Create the node context.
+        let start_instant = std::time::SystemTime::now();
         let node_ctx = NodeContext {
             network: config.network(),
             fast_sync_hashes,
@@ -234,6 +237,11 @@ impl Node {
             blockchain_context: context_svc.clone(),
             txpool_read: txpool_read_handle.clone(),
             sync: sync_state,
+            start_instant_unix: start_instant
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs(),
+            start_instant,
         };
 
         // Start clearnet P2P zone
