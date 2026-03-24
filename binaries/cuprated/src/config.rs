@@ -9,7 +9,7 @@ use std::{
     time::Duration,
 };
 
-use anyhow::bail;
+use anyhow::{bail, Context};
 use clap::Parser;
 use cuprate_blockchain::config::CacheSizes;
 use serde::{Deserialize, Serialize};
@@ -213,7 +213,12 @@ impl Config {
     pub fn read_from_path(file: impl AsRef<Path>) -> Result<Self, anyhow::Error> {
         let file_text = read_to_string(file.as_ref())?;
 
-        let config: Self = toml::from_str(&file_text)?;
+        let config: Self = toml::from_str(&file_text).with_context(|| {
+            format!(
+                "Failed to parse config file at: {}",
+                file.as_ref().display()
+            )
+        })?;
 
         tracing::info!("Using config at: {}", file.as_ref().to_string_lossy());
 

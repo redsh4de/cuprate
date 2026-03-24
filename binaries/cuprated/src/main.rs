@@ -19,8 +19,11 @@
     reason = "TODO: remove after v1.0.0"
 )]
 
-use std::io::{self, IsTerminal};
-use std::{thread::sleep, time::Duration};
+use std::{
+    io::{self, IsTerminal},
+    thread::sleep,
+    time::Duration,
+};
 
 use clap::Parser;
 use tracing::info;
