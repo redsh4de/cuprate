@@ -33,6 +33,7 @@ use cuprated::{
     config::{find_config, Args, Config},
     constants::{DEFAULT_CONFIG_STARTUP_DELAY, DEFAULT_CONFIG_WARNING},
     logging::eprintln_red,
+    monitor::TaskExecutor,
 };
 
 fn main() {
@@ -69,18 +70,32 @@ fn main() {
 
     rt.block_on(async move {
         // Start the node.
-        let cuprated::Node { command, .. } = cuprated::Node::launch(config).await;
+        let node = match cuprated::Node::launch(config).await {
+            Ok(node) => node,
+            Err(e) => {
+                tracing::error!("Failed to launch node: {e:#}");
+                std::process::exit(1);
+            }
+        };
+
+        // Spawn OS signal handler.
+        spawn_signal_handler(node.task_executor.clone());
 
         // If STDIN is a terminal, spawn a blocking thread for user input.
         if io::stdin().is_terminal() {
-            spawn_stdin_reader(command);
+            spawn_stdin_reader(node.command.clone());
         } else {
             // If no STDIN, await OS exit signal.
             info!("Terminal/TTY not detected, disabling STDIN commands");
         }
 
-        tokio::signal::ctrl_c().await.unwrap();
+        // Wait for shutdown signal.
+        node.task_executor.cancellation_token().cancelled().await;
+        node.shutdown().await;
+        drop(node);
     });
+    drop(rt);
+    info!("Shutdown complete.");
 }
 
 /// Spawn a STDIN reader that forwards commands to the [`CommandHandle`].
@@ -182,4 +197,52 @@ fn init_tokio_rt(config: &Config) -> tokio::runtime::Runtime {
         .enable_all()
         .build()
         .unwrap()
+}
+
+/// Spawn a task that listens for OS signals and initiates shutdown.
+///
+/// On the first signal, triggers a graceful shutdown via `task_executor`.
+/// On the second signal, force-exits the process with code 1.
+fn spawn_signal_handler(task_executor: TaskExecutor) {
+    tokio::spawn(async move {
+        let shutdown_token = task_executor.cancellation_token();
+        tokio::select! {
+            biased;
+            () = shutdown_token.cancelled() => {}
+            () = shutdown_signal() => {
+                eprintln!();
+                task_executor.trigger_shutdown();
+                info!("Press Ctrl+C to force exit.");
+            }
+        }
+        // Wait for second signal to force exit.
+        shutdown_signal().await;
+        eprintln!();
+        std::process::exit(1);
+    });
+}
+
+/// Wait for an OS shutdown signal (SIGINT or SIGTERM).
+async fn shutdown_signal() {
+    let ctrl_c = async {
+        tokio::signal::ctrl_c()
+            .await
+            .expect("failed to install SIGINT handler");
+    };
+
+    #[cfg(unix)]
+    let terminate = async {
+        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            .expect("failed to install SIGTERM handler")
+            .recv()
+            .await;
+    };
+
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        () = ctrl_c => {}
+        () = terminate => {}
+    }
 }
