@@ -46,10 +46,9 @@ use cuprate_wire::protocol::{
 };
 
 use crate::{
-    blockchain::interface::{BlockchainManagerHandle, IncomingBlockError},
-    constants::PANIC_CRITICAL_SERVICE_ERROR,
+    blockchain::{interface::BlockchainManagerHandle, IncomingBlockError},
     p2p::CrossNetworkInternalPeerId,
-    txpool::{IncomingTxError, IncomingTxHandler, IncomingTxs},
+    txpool::{IncomingTxHandler, IncomingTxs},
 };
 
 /// The P2P protocol request handler [`MakeService`](tower::MakeService).
@@ -429,20 +428,16 @@ where
     // Drop all the data except the stuff we still need.
     let NewTransactions { txs, .. } = request;
 
-    let res = incoming_tx_handler
+    incoming_tx_handler
         .ready()
-        .await
-        .expect(PANIC_CRITICAL_SERVICE_ERROR)
+        .await?
         .call(IncomingTxs {
             txs,
             state,
             drop_relay_rule_errors: true,
             do_not_relay: false,
         })
-        .await;
+        .await?;
 
-    match res {
-        Ok(()) => Ok(ProtocolResponse::NA),
-        Err(e) => Err(e.into()),
-    }
+    Ok(ProtocolResponse::NA)
 }

@@ -219,7 +219,7 @@ impl Node {
             &mut blockchain_write_handle,
             config.network(),
         )
-        .await;
+        .await?;
 
         // Start the context service and the block/tx verifier.
         let context_svc =
@@ -268,7 +268,7 @@ impl Node {
                 .syncer
                 .callback(context_svc.clone(), blockchain_manager_handle.clone()),
         )
-        .await;
+        .await?;
 
         // Create Tor router delivery channel.
         let (tor_router_tx, tor_router_rx) = tor_enabled.then(oneshot::channel).unzip();
@@ -281,7 +281,7 @@ impl Node {
             txpool_write_handle.clone(),
             node_ctx.clone(),
         )
-        .await;
+        .await?;
 
         // Send tx handler sender to clearnet zone
         clearnet_tx_handler_subscriber
@@ -343,7 +343,13 @@ impl Node {
                 tracing::info!("Starting Tor P2P zone.");
 
                 let (tor_interface, tor_tx_handler_tx) =
-                    p2p::start_tor_p2p(&config, tor_context, node_ctx).await;
+                    match p2p::start_tor_p2p(&config, tor_context, node_ctx).await {
+                        Ok(v) => v,
+                        Err(e) => {
+                            tracing::error!("Failed to start Tor P2P zone: {e:#}");
+                            return;
+                        }
+                    };
 
                 // Publish the Tor interface for consumers
                 drop(tor_tx.send(tor_interface.clone()));

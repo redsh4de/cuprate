@@ -28,7 +28,6 @@ use cuprate_types::blockchain::BlockchainWriteRequest;
 use crate::{
     blockchain::BlockchainManagerHandle,
     config::Config,
-    constants::PANIC_CRITICAL_SERVICE_ERROR,
     tor::{transport_clearnet_daemon_config, transport_daemon_config, TorContext, TorMode},
     txpool::{self, IncomingTxHandler},
     NodeContext,
@@ -104,7 +103,7 @@ pub async fn initialize_clearnet_p2p(
     node_ctx: &NodeContext,
     tor_ctx: &TorContext,
     peer_sync_callback: PeerSyncCallback,
-) -> (NetworkInterface<ClearNet>, Sender<IncomingTxHandler>) {
+) -> anyhow::Result<(NetworkInterface<ClearNet>, Sender<IncomingTxHandler>)> {
     let blockchain_read_handle = node_ctx.blockchain_read.clone();
     let context_svc = node_ctx.blockchain_context.clone();
     let txpool_read_handle = node_ctx.txpool_read.clone();
@@ -125,19 +124,19 @@ pub async fn initialize_clearnet_p2p(
                     blockchain_manager,
                 )
                 .await
-                .unwrap()
             }
-            TorMode::Daemon => start_zone_p2p::<ClearNet, Socks>(
-                blockchain_read_handle,
-                context_svc,
-                txpool_read_handle,
-                config.clearnet_p2p_config(),
-                transport_clearnet_daemon_config(config),
-                Some(peer_sync_callback.clone()),
-                blockchain_manager,
-            )
-            .await
-            .unwrap(),
+            TorMode::Daemon => {
+                start_zone_p2p::<ClearNet, Socks>(
+                    blockchain_read_handle,
+                    context_svc,
+                    txpool_read_handle,
+                    config.clearnet_p2p_config(),
+                    transport_clearnet_daemon_config(config),
+                    Some(peer_sync_callback.clone()),
+                    blockchain_manager,
+                )
+                .await
+            }
             TorMode::Auto => unreachable!("Auto mode should be resolved before this point"),
         },
         ProxySettings::Socks(ref s) => {
@@ -152,7 +151,6 @@ pub async fn initialize_clearnet_p2p(
                     blockchain_manager,
                 )
                 .await
-                .unwrap()
             } else {
                 start_zone_p2p::<ClearNet, Socks>(
                     blockchain_read_handle,
@@ -167,10 +165,10 @@ pub async fn initialize_clearnet_p2p(
                     blockchain_manager,
                 )
                 .await
-                .unwrap()
             }
         }
     }
+    .map_err(anyhow::Error::from_boxed)
 }
 
 /// Start the Tor P2P network zone. Returns [`NetworkInterface<Tor>`] and
@@ -179,33 +177,36 @@ pub async fn start_tor_p2p(
     config: &Config,
     tor_ctx: TorContext,
     node_ctx: NodeContext,
-) -> (NetworkInterface<Tor>, Sender<IncomingTxHandler>) {
+) -> anyhow::Result<(NetworkInterface<Tor>, Sender<IncomingTxHandler>)> {
     match tor_ctx.mode {
-        TorMode::Daemon => start_zone_p2p::<Tor, Daemon>(
-            node_ctx.blockchain_read.clone(),
-            node_ctx.blockchain_context.clone(),
-            node_ctx.txpool_read.clone(),
-            config.tor_p2p_config(&tor_ctx),
-            transport_daemon_config(config),
-            None,
-            node_ctx.blockchain_manager.clone(),
-        )
-        .await
-        .unwrap(),
+        TorMode::Daemon => {
+            start_zone_p2p::<Tor, Daemon>(
+                node_ctx.blockchain_read.clone(),
+                node_ctx.blockchain_context.clone(),
+                node_ctx.txpool_read.clone(),
+                config.tor_p2p_config(&tor_ctx),
+                transport_daemon_config(config),
+                None,
+                node_ctx.blockchain_manager.clone(),
+            )
+            .await
+        }
         #[cfg(feature = "arti")]
-        TorMode::Arti => start_zone_p2p::<Tor, Arti>(
-            node_ctx.blockchain_read.clone(),
-            node_ctx.blockchain_context.clone(),
-            node_ctx.txpool_read.clone(),
-            config.tor_p2p_config(&tor_ctx),
-            transport_arti_config(config, tor_ctx),
-            None,
-            node_ctx.blockchain_manager,
-        )
-        .await
-        .unwrap(),
+        TorMode::Arti => {
+            start_zone_p2p::<Tor, Arti>(
+                node_ctx.blockchain_read.clone(),
+                node_ctx.blockchain_context.clone(),
+                node_ctx.txpool_read.clone(),
+                config.tor_p2p_config(&tor_ctx),
+                transport_arti_config(config, tor_ctx),
+                None,
+                node_ctx.blockchain_manager,
+            )
+            .await
+        }
         TorMode::Auto => unreachable!("Auto mode should be resolved before this point"),
     }
+    .map_err(anyhow::Error::from_boxed)
 }
 
 /// Starts the P2P network zone, returning a [`NetworkInterface`] to interact with it.
