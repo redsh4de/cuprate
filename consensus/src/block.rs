@@ -14,7 +14,7 @@ use tower::{Service, ServiceExt};
 use cuprate_consensus_context::{
     BlockChainContextRequest, BlockChainContextResponse, BlockchainContextService,
 };
-use cuprate_helper::asynch::rayon_spawn_async;
+use cuprate_helper::{asynch::rayon_spawn_async, tx::tx_key_images};
 use cuprate_types::{
     AltBlockInformation, TransactionVerificationData, VerifiedBlockInformation,
     VerifiedTransactionInformation,
@@ -192,13 +192,89 @@ impl PreparedBlock {
     }
 }
 
+/// A blocks ordered transactions paired with the key images they spend.
+///
+/// Produced by [`batch_prepare_main_chain_blocks`].
+#[derive(Debug)]
+pub struct TxsWithKis {
+    txs: Vec<TransactionVerificationData>,
+    spent_key_images: Vec<[u8; 32]>,
+}
+
+impl TxsWithKis {
+    /// Create a new [`TxsWithKis`].
+    pub(crate) fn new(txs: Vec<TransactionVerificationData>) -> Self {
+        let mut spent_key_images =
+            Vec::with_capacity(txs.iter().map(|tx| tx.tx.prefix().inputs.len()).sum());
+        spent_key_images.extend(txs.iter().flat_map(|tx| tx_key_images(&tx.tx)));
+        Self {
+            txs,
+            spent_key_images,
+        }
+    }
+
+    /// The transactions.
+    pub(crate) fn txs(&self) -> &[TransactionVerificationData] {
+        &self.txs
+    }
+
+    /// The spent key images.
+    pub(crate) fn spent_key_images(&self) -> &[[u8; 32]] {
+        &self.spent_key_images
+    }
+
+    /// Split into the transactions and the validated spent key images.
+    pub(crate) fn into_parts(self) -> (Vec<TransactionVerificationData>, Vec<[u8; 32]>) {
+        (self.txs, self.spent_key_images)
+    }
+}
+
+/// A verified block paired with its spent key images.
+#[derive(Debug)]
+pub struct VerifiedBlock {
+    pub(crate) info: VerifiedBlockInformation,
+    pub(crate) spent_key_images: Vec<[u8; 32]>,
+}
+
+impl VerifiedBlock {
+    /// Create a new [`VerifiedBlock`] from a [`VerifiedBlockInformation`].
+    ///
+    /// # Panics
+    ///
+    /// This will panic if any non-miner transaction has a input for a miner transaction.
+    pub fn new(info: VerifiedBlockInformation) -> Self {
+        let mut spent_key_images =
+            Vec::with_capacity(info.txs.iter().map(|tx| tx.tx.prefix().inputs.len()).sum());
+        spent_key_images.extend(info.txs.iter().flat_map(|tx| {
+            tx.tx.prefix().inputs.iter().map(|input| match input {
+                Input::ToKey { key_image, .. } => key_image.to_bytes(),
+                Input::Gen(_) => unreachable!(),
+            })
+        }));
+        Self {
+            info,
+            spent_key_images,
+        }
+    }
+
+    /// The verified block information.
+    pub const fn info(&self) -> &VerifiedBlockInformation {
+        &self.info
+    }
+
+    /// Split into the verified block information and spent key images.
+    pub fn into_parts(self) -> (VerifiedBlockInformation, Vec<[u8; 32]>) {
+        (self.info, self.spent_key_images)
+    }
+}
+
 /// Fully verify a block and all its transactions.
 pub async fn verify_main_chain_block<D>(
     block: Block,
     txs: HashMap<[u8; 32], TransactionVerificationData>,
     context_svc: &mut BlockchainContextService,
     database: D,
-) -> Result<VerifiedBlockInformation, ExtendedConsensusError>
+) -> Result<VerifiedBlock, ExtendedConsensusError>
 where
     D: Database + Clone + Send + 'static,
 {
@@ -243,20 +319,43 @@ where
     // Check that the txs included are what we need and that there are not any extra.
     let ordered_txs = pull_ordered_transactions(&prepped_block.block, txs)?;
 
-    verify_prepped_main_chain_block(prepped_block, ordered_txs, context_svc, database, None).await
+    verify_prepped_main_chain_block(
+        prepped_block,
+        PreparedBlockTxs::Raw(ordered_txs),
+        context_svc,
+        database,
+        None,
+    )
+    .await
+}
+
+/// Ordered transactions for a prepared block.
+pub enum PreparedBlockTxs {
+    /// Raw transactions. The key images will be checked.
+    Raw(Vec<TransactionVerificationData>),
+    /// Transactions with pre-validated key images.
+    Validated(TxsWithKis),
 }
 
 /// Fully verify a block that has already been prepared using [`batch_prepare_main_chain_blocks`].
 pub async fn verify_prepped_main_chain_block<D>(
     prepped_block: PreparedBlock,
-    mut txs: Vec<TransactionVerificationData>,
+    txs: PreparedBlockTxs,
     context_svc: &mut BlockchainContextService,
     database: D,
     batch_prep_cache: Option<&mut BatchPrepareCache>,
-) -> Result<VerifiedBlockInformation, ExtendedConsensusError>
+) -> Result<VerifiedBlock, ExtendedConsensusError>
 where
     D: Database + Clone + Send + 'static,
 {
+    let (mut txs, precomputed_kis) = match txs {
+        PreparedBlockTxs::Raw(txs) => (txs, None),
+        PreparedBlockTxs::Validated(twk) => {
+            let (txs, kis) = twk.into_parts();
+            (txs, Some(kis))
+        }
+    };
+
     let context = context_svc.blockchain_context();
 
     tracing::debug!("verifying block: {}", hex::encode(prepped_block.block_hash));
@@ -268,14 +367,16 @@ where
         return Err(ExtendedConsensusError::TxsIncludedWithBlockIncorrect);
     }
 
-    if !prepped_block.block.transactions.is_empty() {
+    let spent_key_images = if prepped_block.block.transactions.is_empty() {
+        precomputed_kis.unwrap_or_default()
+    } else {
         for (expected_tx_hash, tx) in prepped_block.block.transactions.iter().zip(txs.iter()) {
             if expected_tx_hash != &tx.tx_hash {
                 return Err(ExtendedConsensusError::TxsIncludedWithBlockIncorrect);
             }
         }
 
-        let temp = start_tx_verification()
+        let (verified_txs, kis) = start_tx_verification()
             .append_prepped_txs(mem::take(&mut txs))
             .prepare()?
             .full(
@@ -286,11 +387,11 @@ where
                 database,
                 batch_prep_cache.as_deref(),
             )
-            .verify()
+            .verify_with_kis(precomputed_kis)
             .await?;
-
-        txs = temp;
-    }
+        txs = verified_txs;
+        kis
+    };
 
     let block_weight =
         prepped_block.miner_tx_weight + txs.iter().map(|tx| tx.tx_weight).sum::<usize>();
@@ -306,7 +407,7 @@ where
     )
     .map_err(ConsensusError::Block)?;
 
-    let block = VerifiedBlockInformation {
+    let info = VerifiedBlockInformation {
         block_hash: prepped_block.block_hash,
         block: prepped_block.block,
         block_blob: prepped_block.block_blob,
@@ -336,8 +437,11 @@ where
     };
 
     if let Some(batch_prep_cache) = batch_prep_cache {
-        batch_prep_cache.output_cache.add_block_to_cache(&block);
+        batch_prep_cache.output_cache.add_block_to_cache(&info);
     }
 
-    Ok(block)
+    Ok(VerifiedBlock {
+        info,
+        spent_key_images,
+    })
 }

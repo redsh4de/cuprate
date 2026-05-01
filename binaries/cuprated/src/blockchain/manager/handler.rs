@@ -1,12 +1,9 @@
 //! The blockchain manager handler functions.
-use std::{collections::HashMap, sync::Arc};
+use std::collections::HashMap;
 
 use bytes::Bytes;
 use futures::{TryFutureExt, TryStreamExt};
-use monero_oxide::{
-    block::Block,
-    transaction::{Input, Transaction},
-};
+use monero_oxide::block::Block;
 use rayon::prelude::*;
 use tower::{Service, ServiceExt};
 use tracing::{info, instrument, warn, Span};
@@ -15,7 +12,7 @@ use cuprate_blockchain::service::{BlockchainReadHandle, BlockchainWriteHandle};
 use cuprate_consensus::{
     block::{
         batch_prepare_main_chain_blocks, sanity_check_alt_block, verify_main_chain_block,
-        verify_prepped_main_chain_block, PreparedBlock,
+        verify_prepped_main_chain_block, PreparedBlock, PreparedBlockTxs, VerifiedBlock,
     },
     transactions::new_tx_verification_data,
     BlockChainContextRequest, BlockChainContextResponse, ExtendedConsensusError,
@@ -148,7 +145,7 @@ impl super::BlockchainManager {
         )
         .await?;
 
-        let block_blob = Bytes::copy_from_slice(&verified_block.block_blob);
+        let block_blob = Bytes::copy_from_slice(&verified_block.info().block_blob);
         self.add_valid_block_to_main_chain(verified_block).await;
 
         let chain_height = self
@@ -236,11 +233,11 @@ impl super::BlockchainManager {
             return;
         };
 
-        for (block, txs) in prepped_blocks {
+        for (block, txs_with_kis) in prepped_blocks {
             let hash = block.block_hash;
             let verified_block = match verify_prepped_main_chain_block(
                 block,
-                txs,
+                PreparedBlockTxs::Validated(txs_with_kis),
                 &mut self.blockchain_context_service,
                 self.blockchain_read_handle.clone(),
                 Some(&mut output_cache),
@@ -530,11 +527,12 @@ impl super::BlockchainManager {
         }
 
         for block in blocks {
-            let verified_block = alt_block_to_verified_block_information(
+            let info = alt_block_to_verified_block_information(
                 block,
                 self.blockchain_context_service.blockchain_context(),
             );
-            self.add_valid_block_to_main_chain(verified_block).await;
+            self.add_valid_block_to_main_chain(VerifiedBlock::new(info))
+                .await;
         }
 
         self.blockchain_write_handle
@@ -611,7 +609,7 @@ impl super::BlockchainManager {
 
             let verified_block = verify_prepped_main_chain_block(
                 prepped_block,
-                prepped_txs,
+                PreparedBlockTxs::Raw(prepped_txs),
                 &mut self.blockchain_context_service,
                 self.blockchain_read_handle.clone(),
                 None,
@@ -632,30 +630,16 @@ impl super::BlockchainManager {
     ///
     /// This function will panic if any internal service returns an unexpected error that we cannot
     /// recover from.
-    pub async fn add_valid_block_to_main_chain(
-        &mut self,
-        verified_block: VerifiedBlockInformation,
-    ) {
-        // FIXME: this is pretty inefficient, we should probably return the KI map created in the consensus crate.
-        let spent_key_images = verified_block
-            .txs
-            .iter()
-            .flat_map(|tx| {
-                tx.tx.prefix().inputs.iter().map(|input| match input {
-                    Input::ToKey { key_image, .. } => key_image.to_bytes(),
-                    Input::Gen(_) => unreachable!(),
-                })
-            })
-            .collect::<Vec<[u8; 32]>>();
+    pub async fn add_valid_block_to_main_chain(&mut self, verified_block: VerifiedBlock) {
+        let (info, spent_key_images) = verified_block.into_parts();
 
-        self.add_valid_block_to_blockchain_cache(&verified_block)
-            .await;
+        self.add_valid_block_to_blockchain_cache(&info).await;
 
         self.blockchain_write_handle
             .ready()
             .await
             .expect(PANIC_CRITICAL_SERVICE_ERROR)
-            .call(BlockchainWriteRequest::WriteBlock(verified_block))
+            .call(BlockchainWriteRequest::WriteBlock(info))
             .await
             .expect(PANIC_CRITICAL_SERVICE_ERROR);
 
