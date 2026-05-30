@@ -19,11 +19,7 @@
     reason = "TODO: remove after v1.0.0"
 )]
 
-use std::{
-    io::{self, IsTerminal},
-    thread::sleep,
-    time::Duration,
-};
+use std::{thread::sleep, time::Duration};
 
 use clap::Parser;
 use tokio::sync::mpsc;
@@ -37,12 +33,9 @@ use cuprated::{
 };
 
 mod args;
-mod commands;
+mod terminal;
 
-use crate::{
-    args::Args,
-    commands::{command_listener, Command},
-};
+use crate::{args::Args, terminal::commands};
 
 fn main() {
     // Set global private permissions for created files.
@@ -54,8 +47,11 @@ fn main() {
 
     let mut config = load_config(&args);
 
+    // If STDIN is a terminal, initialize it.
+    let (terminal, stdout_writer) = terminal::try_init();
+
     // Initialize logging.
-    cuprated::logging::init_logging(&config);
+    cuprated::logging::init_logging(&config, stdout_writer, terminal::SUPPRESSED_LOG_TARGETS);
 
     // Resolve available memory.
     resolve_max_memory(&mut config);
@@ -86,12 +82,15 @@ fn main() {
         spawn_signal_handler(task_executor.clone());
 
         // If STDIN is a terminal, spawn a blocking thread for user input.
-        if io::stdin().is_terminal() {
+        if let Some((terminal, output)) = terminal {
             let (command_tx, command_rx) = mpsc::channel(1);
-            std::thread::spawn(|| commands::command_listener(command_tx));
+            std::thread::spawn({
+                let task_executor = task_executor.clone();
+                move || commands::command_listener(command_tx, terminal, task_executor)
+            });
 
             // Wait on the io_loop, spawned on a separate task as this improves performance.
-            task_executor.spawn(commands::io_loop(command_rx, node));
+            task_executor.spawn(commands::io_loop(command_rx, node, output));
 
             // Wait for shutdown and all tracked tasks to finish.
             task_executor.wait_for_shutdown().await;

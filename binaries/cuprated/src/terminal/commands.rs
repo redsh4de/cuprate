@@ -1,11 +1,7 @@
 //! Commands
 //!
 //! `cuprated` [`Command`] definition and handling.
-use std::{
-    io,
-    thread::sleep,
-    time::{Duration, Instant},
-};
+use std::time::Instant;
 
 use clap::{builder::TypedValueParser, Parser, ValueEnum};
 use tokio::sync::mpsc;
@@ -17,9 +13,14 @@ use cuprate_consensus_context::{
 };
 use cuprate_helper::time::secs_to_hms;
 
-use cuprated::logging::{self, CupratedTracingFilter};
+use cuprated::{
+    logging::{self, CupratedTracingFilter},
+    monitor::TaskExecutor,
+};
 
-/// A command received from [`io::stdin`].
+use super::{CommandOutput, Line, Reader};
+
+/// A command received from the interactive prompt.
 #[derive(Debug, Parser)]
 #[command(
     multicall = true,
@@ -69,20 +70,14 @@ pub enum OutputTarget {
 }
 
 /// The [`Command`] listener loop.
-pub fn command_listener(incoming_commands: mpsc::Sender<Command>) -> ! {
-    let mut stdin = io::stdin();
-    let mut line = String::new();
-
-    loop {
-        line.clear();
-
-        if let Err(e) = stdin.read_line(&mut line) {
-            eprintln!("Failed to read from stdin: {e}");
-            sleep(Duration::from_secs(1));
-            continue;
-        }
-
+pub fn command_listener(
+    incoming_commands: mpsc::Sender<Command>,
+    mut reader: Reader,
+    task_executor: TaskExecutor,
+) {
+    while let Line::Input(line) = reader.read_line() {
         match Command::try_parse_from(line.split_whitespace()) {
+            Ok(Command::Exit) => break,
             Ok(command) => drop(
                 incoming_commands
                     .blocking_send(command)
@@ -91,10 +86,16 @@ pub fn command_listener(incoming_commands: mpsc::Sender<Command>) -> ! {
             Err(err) => err.print().unwrap(),
         }
     }
+
+    task_executor.trigger_shutdown();
 }
 
 /// The [`Command`] handler loop.
-pub async fn io_loop(mut incoming_commands: mpsc::Receiver<Command>, mut node: cuprated::Node) {
+pub async fn io_loop(
+    mut incoming_commands: mpsc::Receiver<Command>,
+    mut node: cuprated::Node,
+    output: CommandOutput,
+) {
     let start_instant = Instant::now();
     let shutdown_token = node.task_executor.cancellation_token();
 
@@ -116,17 +117,20 @@ pub async fn io_loop(mut incoming_commands: mpsc::Receiver<Command>, mut node: c
                 level,
                 output_target,
             } => {
+                let mut new_filter = String::new();
                 let modify_output = |filter: &mut CupratedTracingFilter| {
                     if let Some(level) = level {
                         filter.level = level;
                     }
-                    println!("NEW LOG FILTER: {filter}");
+                    new_filter = filter.to_string();
                 };
 
                 match output_target {
                     OutputTarget::File => logging::modify_file_output(modify_output),
                     OutputTarget::Stdout => logging::modify_stdout_output(modify_output),
                 }
+
+                writeln!(output, "NEW LOG FILTER: {new_filter}");
             }
             Command::Status => {
                 let context = node.blockchain.context();
@@ -137,26 +141,28 @@ pub async fn io_loop(mut incoming_commands: mpsc::Receiver<Command>, mut node: c
                 let height = context.chain_height;
                 let top_hash = hex::encode(context.top_hash);
 
-                println!("STATUS:\n  uptime: {h}h {m}m {s}s,\n  height: {height},\n  top_hash: {top_hash}");
+                writeln!(
+                    output,
+                    "STATUS:\n  uptime: {h}h {m}m {s}s,\n  height: {height},\n  top_hash: {top_hash}"
+                );
             }
             Command::FastSyncStopHeight => {
                 let stop_height =
                     cuprate_fast_sync::fast_sync_stop_height(node.config.fast_sync_hashes());
 
-                println!("{stop_height}");
+                writeln!(output, "{stop_height}");
             }
             Command::PopBlocks { numb_blocks } => {
                 tracing::info!("Popping {numb_blocks} blocks.");
                 let res = node.blockchain.manager().pop_blocks(numb_blocks).await;
 
                 match res {
-                    Ok(()) => println!("Popped {numb_blocks} blocks."),
-                    Err(e) => println!("Failed to pop blocks: {e}"),
+                    Ok(()) => writeln!(output, "Popped {numb_blocks} blocks."),
+                    Err(e) => writeln!(output, "Failed to pop blocks: {e}"),
                 }
             }
-            Command::Exit => {
-                node.shutdown();
-            }
+            // Triggered by the command listener.
+            Command::Exit => {}
         }
     }
 }

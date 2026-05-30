@@ -13,10 +13,11 @@ use tracing::{
 };
 use tracing_appender::{non_blocking::NonBlocking, rolling::Rotation};
 use tracing_subscriber::{
-    filter::Filtered,
+    filter::{Filtered, Targets},
     fmt::{
         self,
         format::{DefaultFields, Format},
+        writer::BoxMakeWriter,
         Layer as FmtLayer,
     },
     layer::{Context, Filter, Layered, SubscriberExt},
@@ -58,6 +59,7 @@ static STDOUT_FILTER_HANDLE: OnceLock<
 #[derive(Debug)]
 pub struct CupratedTracingFilter {
     pub level: LevelFilter,
+    suppressed: Targets,
 }
 
 // Custom display behavior for command output.
@@ -71,10 +73,16 @@ impl Display for CupratedTracingFilter {
 
 impl<S> Filter<S> for CupratedTracingFilter {
     fn enabled(&self, meta: &Metadata<'_>, cx: &Context<'_, S>) -> bool {
+        if !Filter::<S>::enabled(&self.suppressed, meta, cx) {
+            return false;
+        }
         Filter::<S>::enabled(&self.level, meta, cx)
     }
 
     fn callsite_enabled(&self, meta: &'static Metadata<'static>) -> Interest {
+        if Filter::<S>::callsite_enabled(&self.suppressed, meta).is_never() {
+            return Interest::never();
+        }
         Filter::<S>::callsite_enabled(&self.level, meta)
     }
 
@@ -84,10 +92,19 @@ impl<S> Filter<S> for CupratedTracingFilter {
 }
 
 /// Initialize [`tracing`] for logging to stdout and to a file.
-pub fn init_logging(config: &Config) {
+pub fn init_logging(
+    config: &Config,
+    stdout_writer: BoxMakeWriter,
+    suppressed_targets: &'static [&'static str],
+) {
+    let suppressed = Targets::new()
+        .with_default(LevelFilter::TRACE)
+        .with_targets(suppressed_targets.iter().map(|&t| (t, LevelFilter::OFF)));
+
     // initialize the stdout filter, set `STDOUT_FILTER_HANDLE` and create the layer.
     let (stdout_filter, stdout_handle) = ReloadLayer::new(CupratedTracingFilter {
         level: config.tracing.stdout.level,
+        suppressed: suppressed.clone(),
     });
 
     STDOUT_FILTER_HANDLE.set(stdout_handle).unwrap();
@@ -95,6 +112,7 @@ pub fn init_logging(config: &Config) {
     let stdout_layer = FmtLayer::default()
         .with_target(false)
         .with_ansi(ansi_enabled(&std::io::stdout()))
+        .with_writer(stdout_writer)
         .with_filter(stdout_filter);
 
     // create the tracing appender.
@@ -113,6 +131,7 @@ pub fn init_logging(config: &Config) {
     // initialize the appender filter, set `FILE_WRITER_FILTER_HANDLE` and create the layer.
     let (appender_filter, appender_handle) = ReloadLayer::new(CupratedTracingFilter {
         level: appender_config.level,
+        suppressed,
     });
     FILE_WRITER_FILTER_HANDLE.set(appender_handle).unwrap();
 
@@ -153,7 +172,7 @@ pub fn eprintln_red(s: &str) {
 }
 
 /// Whether to emit ANSI escape codes on `stream`.
-fn ansi_enabled(stream: &impl IsTerminal) -> bool {
+pub fn ansi_enabled(stream: &impl IsTerminal) -> bool {
     if std::env::var_os("NO_COLOR").is_some_and(|v| !v.is_empty()) {
         return false;
     }
