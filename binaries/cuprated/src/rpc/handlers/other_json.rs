@@ -388,7 +388,7 @@ async fn send_raw_transaction(
                 return Err("No inputs".to_string());
             };
 
-            let mut rct_indices = vec![];
+            let mut rct_indices = BTreeSet::new();
             let mut n_indices: usize = 0;
 
             for input in &tx.prefix().inputs {
@@ -399,14 +399,16 @@ async fn send_raw_transaction(
                         key_offsets,
                         key_image,
                     } => {
-                        let Some(amount) = amount else {
+                        if amount.is_some() {
                             continue;
-                        };
+                        }
+
+                        if key_offsets.is_empty() {
+                            return Err("Input has an empty ring".to_string());
+                        }
 
                         /// <https://github.com/monero-project/monero/blob/893916ad091a92e765ce3241b94e706ad012b62a/src/cryptonote_basic/cryptonote_format_utils.cpp#L1526>
                         fn relative_output_offsets_to_absolute(mut offsets: Vec<u64>) -> Vec<u64> {
-                            assert!(!offsets.is_empty());
-
                             for i in 1..offsets.len() {
                                 offsets[i] += offsets[i - 1];
                             }
@@ -434,7 +436,7 @@ async fn send_raw_transaction(
                 return Err(format!("amount of unique indices is too low (amount of rct indices is {rct_indices_len} out of total {n_indices} indices."));
             }
 
-            let median = cuprate_helper::num::median(rct_indices);
+            let median = cuprate_helper::num::median(rct_indices.into_iter().collect::<Vec<_>>());
             if median < rct_outs_available * 6 / 10 {
                 return Err(format!("median offset index is too low (median is {median} out of total {rct_outs_available} offsets). Transactions should contain a higher fraction of recent outputs."));
             }
