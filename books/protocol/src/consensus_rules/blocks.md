@@ -84,6 +84,9 @@ must not be less than
 the median timestamp over the last 60 blocks[^timestamp-lower-limit], if there are less than 60 blocks in the chain then
 this lower limit is ignored.
 
+For alt blocks only the lower limit is checked[^alt-timestamp], the upper limit is enforced when an alt chain is
+reorged onto the main chain.
+
 ---
 
 [^block-size-check]: <https://github.com/monero-project/monero/blob/67d190ce7c33602b6a3b804f633ee1ddb7fbb4a1/src/cryptonote_core/cryptonote_core.cpp#L1684>
@@ -109,3 +112,5 @@ this lower limit is ignored.
 [^timestamp-upper-limit]: <https://github.com/monero-project/monero/blob/eac1b86bb2818ac552457380c9dd421fb8935e5b/src/cryptonote_core/blockchain.cpp#L4064>
 
 [^timestamp-lower-limit]: <https://github.com/monero-project/monero/blob/eac1b86bb2818ac552457380c9dd421fb8935e5b/src/cryptonote_core/blockchain.cpp#L4045>
+
+[^alt-timestamp]: <https://github.com/monero-project/monero/blob/eac1b86bb2818ac552457380c9dd421fb8935e5b/src/cryptonote_core/blockchain.cpp#L1986>

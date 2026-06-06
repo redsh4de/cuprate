@@ -15,7 +15,8 @@ use cuprate_consensus_context::{
 };
 use cuprate_consensus_rules::{
     blocks::{
-        check_block_pow, check_block_weight, check_timestamp, randomx_seed_height, BlockError,
+        check_block_pow, check_block_weight, check_timestamp_median, randomx_seed_height,
+        BlockError,
     },
     miner_tx::MinerTxError,
     ConsensusError,
@@ -103,7 +104,8 @@ where
     // Check the alt block timestamp is in the correct range.
     let median_timestamp =
         difficulty_cache.median_timestamp(u64_to_usize(BLOCKCHAIN_TIMESTAMP_CHECK_WINDOW));
-    check_timestamp(&prepped_block.block, median_timestamp).map_err(ConsensusError::Block)?;
+    check_timestamp_median(&prepped_block.block, median_timestamp)
+        .map_err(ConsensusError::Block)?;
 
     let next_difficulty = difficulty_cache.next_difficulty(prepped_block.hf_version);
     // make sure the block's PoW is valid for this difficulty.

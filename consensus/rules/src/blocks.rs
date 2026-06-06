@@ -186,12 +186,24 @@ fn check_prev_id(block: &Block, top_hash: &[u8; 32]) -> Result<(), BlockError> {
 ///
 /// ref: <https://monero-book.cuprate.org/consensus_rules/blocks.html#timestamp>
 pub fn check_timestamp(block: &Block, median_timestamp: Option<u64>) -> Result<(), BlockError> {
-    let timestamp = block.header.timestamp;
+    if block.header.timestamp > current_unix_timestamp() + BLOCK_FUTURE_TIME_LIMIT {
+        return Err(BlockError::TimeStampInvalid);
+    }
 
-    let too_far_in_future = timestamp > current_unix_timestamp() + BLOCK_FUTURE_TIME_LIMIT;
-    let below_median = median_timestamp.is_some_and(|median| timestamp < median);
+    check_timestamp_median(block, median_timestamp)
+}
 
-    if too_far_in_future || below_median {
+/// Checks the blocks timestamp is not less than the median timestamp.
+///
+/// This is the only timestamp check for alt blocks, the future-time limit is enforced
+/// when an alt chain is reorged onto the main chain.
+///
+/// ref: <https://monero-book.cuprate.org/consensus_rules/blocks.html#timestamp>
+pub fn check_timestamp_median(
+    block: &Block,
+    median_timestamp: Option<u64>,
+) -> Result<(), BlockError> {
+    if median_timestamp.is_some_and(|median| block.header.timestamp < median) {
         Err(BlockError::TimeStampInvalid)
     } else {
         Ok(())
