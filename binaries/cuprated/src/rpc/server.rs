@@ -37,8 +37,9 @@ const RPC_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
 /// # Errors
 ///
 /// This function will return an [`Err`] if unrestricted RPC is started on a
-/// non-local address without the override option, or if an RPC listener cannot
-/// be bound.
+/// non-local address without the override option, if log redaction is disabled
+/// while RPC is bound to a non-local address without the override option, or if
+/// an RPC listener cannot be bound.
 pub(crate) async fn init_rpc_servers(
     launch_ctx: &LaunchContext,
     tx_handler: IncomingTxHandler,
@@ -80,6 +81,23 @@ pub(crate) async fn init_rpc_servers(
                 );
             } else {
                 anyhow::bail!("Refusing to start unrestricted RPC on a non-local address ({addr})");
+            }
+        }
+
+        if !ip_is_local(addr) && !launch_ctx.config.tracing.redact {
+            if launch_ctx
+                .config
+                .tracing
+                .i_know_what_im_doing_allow_unredacted_public_logs
+            {
+                warn!(
+                    address = %addr,
+                    "Starting RPC on non-local address with log redaction disabled, this is dangerous!"
+                );
+            } else {
+                anyhow::bail!(
+                    "Refusing to start RPC on a non-local address ({addr}) with log redaction disabled"
+                );
             }
         }
 
