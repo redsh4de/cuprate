@@ -164,16 +164,25 @@ const fn get_hash_index_for_height(height: usize) -> usize {
     height / FAST_SYNC_BATCH_LEN
 }
 
-/// Creates a [`VerifiedBlockInformation`] from a block known to be valid.
+/// The context-independent part of a fast-sync block's [`VerifiedBlockInformation`].
+pub struct PreparedFastSyncBlock {
+    pub block: Block,
+    pub block_hash: [u8; 32],
+    pub block_blob: Vec<u8>,
+    pub height: usize,
+    pub generated_coins: u64,
+    pub weight: usize,
+    pub txs: Vec<VerifiedTransactionInformation>,
+}
+
+/// Prepares the context-independent verification data for a block known to be valid.
+///
+/// This is the expensive, hashing-heavy part and can be run in parallel over a batch.
 ///
 /// # Panics
 ///
 /// This may panic if used on an invalid block.
-pub fn block_to_verified_block_information(
-    block: Block,
-    txs: Vec<Transaction>,
-    blockchin_ctx: &BlockchainContext,
-) -> VerifiedBlockInformation {
+pub fn prepare_fast_sync_block(block: Block, txs: Vec<Transaction>) -> PreparedFastSyncBlock {
     let block_hash = block.hash();
 
     let block_blob = block.serialize();
@@ -181,11 +190,7 @@ pub fn block_to_verified_block_information(
     let Some(Input::Gen(height)) = block.miner_transaction().prefix().inputs.first() else {
         panic!("fast sync block invalid");
     };
-
-    assert_eq!(
-        *height, blockchin_ctx.chain_height,
-        "fast sync block invalid"
-    );
+    let height = *height;
 
     let mut txs = txs
         .into_iter()
@@ -225,17 +230,44 @@ pub fn block_to_verified_block_information(
     let weight = block.miner_transaction().weight()
         + verified_txs.iter().map(|tx| tx.tx_weight).sum::<usize>();
 
-    VerifiedBlockInformation {
-        block_blob,
-        txs: verified_txs,
+    PreparedFastSyncBlock {
+        block,
         block_hash,
-        pow_hash: [u8::MAX; 32],
-        height: *height,
+        block_blob,
+        height,
         generated_coins,
         weight,
-        long_term_weight: blockchin_ctx.next_block_long_term_weight(weight),
+        txs: verified_txs,
+    }
+}
+
+/// Fills in the context-dependent fields of a [`PreparedFastSyncBlock`].
+///
+/// This is cheap and must be done sequentially, as the context updates after each block.
+///
+/// # Panics
+///
+/// This may panic if used on an invalid block.
+pub fn finalize_fast_sync_block(
+    prepped: PreparedFastSyncBlock,
+    blockchin_ctx: &BlockchainContext,
+) -> VerifiedBlockInformation {
+    assert_eq!(
+        prepped.height, blockchin_ctx.chain_height,
+        "fast sync block invalid"
+    );
+
+    VerifiedBlockInformation {
+        block_blob: prepped.block_blob,
+        txs: prepped.txs,
+        block_hash: prepped.block_hash,
+        pow_hash: [u8::MAX; 32],
+        height: prepped.height,
+        generated_coins: prepped.generated_coins,
+        weight: prepped.weight,
+        long_term_weight: blockchin_ctx.next_block_long_term_weight(prepped.weight),
         cumulative_difficulty: blockchin_ctx.cumulative_difficulty + blockchin_ctx.next_difficulty,
-        block,
+        block: prepped.block,
     }
 }
 

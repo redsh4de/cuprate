@@ -21,8 +21,8 @@ use cuprate_consensus::{
     BlockChainContextRequest, BlockChainContextResponse, ExtendedConsensusError,
 };
 use cuprate_consensus_context::{distribution::rct_output_count, BlockchainContext, NewBlockData};
-use cuprate_fast_sync::{block_to_verified_block_information, fast_sync_stop_height};
-use cuprate_helper::cast::usize_to_u64;
+use cuprate_fast_sync::{fast_sync_stop_height, finalize_fast_sync_block, prepare_fast_sync_block};
+use cuprate_helper::{asynch::rayon_spawn_async, cast::usize_to_u64};
 use cuprate_p2p::{block_downloader::BlockBatch, constants::LONG_BAN, BroadcastRequest};
 use cuprate_txpool::service::interface::TxpoolWriteRequest;
 use cuprate_types::{
@@ -266,11 +266,19 @@ impl super::BlockchainManager {
     /// This function will panic if any internal service returns an unexpected error that we cannot
     /// recover from.
     async fn handle_incoming_block_batch_fast_sync(&mut self, batch: BlockBatch) {
-        let mut valid_blocks = Vec::with_capacity(batch.blocks.len());
-        for (block, txs) in batch.blocks {
-            let block = block_to_verified_block_information(
-                block,
-                txs,
+        let prepped_blocks = rayon_spawn_async(move || {
+            batch
+                .blocks
+                .into_par_iter()
+                .map(|(block, txs)| prepare_fast_sync_block(block, txs))
+                .collect::<Vec<_>>()
+        })
+        .await;
+
+        let mut valid_blocks = Vec::with_capacity(prepped_blocks.len());
+        for prepped in prepped_blocks {
+            let block = finalize_fast_sync_block(
+                prepped,
                 self.blockchain_context_service.blockchain_context(),
             );
             self.add_valid_block_to_blockchain_cache(&block).await;

@@ -14,6 +14,6 @@ use tracing_subscriber as _;
 mod fast_sync;
 
 pub use fast_sync::{
-    block_to_verified_block_information, fast_sync_stop_height, validate_entries,
-    FAST_SYNC_BATCH_LEN,
+    fast_sync_stop_height, finalize_fast_sync_block, prepare_fast_sync_block, validate_entries,
+    PreparedFastSyncBlock, FAST_SYNC_BATCH_LEN,
 };
