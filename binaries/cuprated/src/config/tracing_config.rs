@@ -26,19 +26,6 @@ config_struct! {
         /// Type         | boolean
         /// Valid values | true, false
         pub redact: bool,
-
-        /// Allow disabling log redaction even when RPC is publicly reachable.
-        ///
-        /// ⚠️ WARNING ⚠️
-        /// -------------
-        /// Log redaction should almost never be disabled on a public node.
-        /// If redaction is disabled (see `redact`) while RPC is bound to a
-        /// non-local address, cuprated will panic, unless this setting is
-        /// set to `true`.
-        ///
-        /// Type         | boolean
-        /// Valid values | true, false
-        pub i_know_what_im_doing_allow_unredacted_public_logs: bool,
     }
 }
 
@@ -48,7 +35,6 @@ impl Default for TracingConfig {
             stdout: StdoutTracingConfig::default(),
             file: FileTracingConfig::default(),
             redact: true,
-            i_know_what_im_doing_allow_unredacted_public_logs: false,
         }
     }
 }

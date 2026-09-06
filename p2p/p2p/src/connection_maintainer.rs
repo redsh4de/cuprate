@@ -115,7 +115,10 @@ where
         let mut handshake_futs = JoinSet::new();
 
         for seed in seeds {
-            tracing::info!("Getting peers from seed node: {}", seed.display_redacted());
+            tracing::info!(
+                "Getting peers from seed node: {}",
+                seed.display_unredacted()
+            );
 
             let addr = *seed;
             let fut = timeout(
@@ -133,14 +136,14 @@ where
                         Err(_) => {
                             tracing::warn!(
                                 "Timed out connecting to seed node: {}",
-                                addr.display_redacted()
+                                addr.display_unredacted()
                             );
                             false
                         }
                         Ok(Err(e)) => {
                             tracing::warn!(
                                 "Failed to connect to seed node {}: {e}",
-                                addr.display_redacted()
+                                addr.display_unredacted()
                             );
                             false
                         }

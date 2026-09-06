@@ -118,13 +118,16 @@ config_struct! {
 
 impl Debug for TorDaemonConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let Self {
+            address,
+            anonymous_inbound,
+            listening_addr,
+        } = self;
+
         f.debug_struct("TorDaemonConfig")
-            .field("address", &self.address)
-            .field(
-                "anonymous_inbound",
-                &safelog::sensitive(&self.anonymous_inbound),
-            )
-            .field("listening_addr", &self.listening_addr)
+            .field("address", address)
+            .field("anonymous_inbound", &safelog::sensitive(anonymous_inbound))
+            .field("listening_addr", listening_addr)
             .finish()
     }
 }
