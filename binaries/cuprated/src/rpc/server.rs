@@ -216,7 +216,7 @@ impl RpcServer {
                     self.serve(socket, remote_addr, shutdown_token.clone());
                 },
                 Some(Err(err)) = self.rpc_tasks.join_next() => {
-                    debug!("RPC serving task failed: {err:#}");
+                    tracing::error!("RPC serving task failed: {err:#}");
                 }
                 () = shutdown_token.cancelled() => {
                     break;

@@ -227,7 +227,7 @@ impl<T: LevinBody> Decoder for LevinMessageCodec<T> {
                         // but will always produce one, so it is ok for us to require one.
 
                         #[cfg(feature = "tracing")]
-                        tracing::debug!("Bucket is a fragment, waiting for rest of message.");
+                        tracing::trace!("Bucket is a fragment, waiting for rest of message.");
 
                         self.state = MessageState::WaitingForRestOfFragment(bucket.body.to_vec());
 
@@ -313,7 +313,7 @@ impl<T: LevinBody> Decoder for LevinMessageCodec<T> {
                         }
 
                         #[cfg(feature = "tracing")]
-                        tracing::debug!(
+                        tracing::trace!(
                             "Received final fragment, combined message command: {:?}.",
                             header.command
                         );

@@ -354,13 +354,13 @@ fn get_window_start_and_end(
 }
 
 /// Returns the timestamps and cumulative difficulty for the blocks with heights in the specified range.
-#[instrument(name = "get_blocks_timestamps", skip(database), level = "info")]
+#[instrument(name = "get_blocks_timestamps", skip(database), level = "debug")]
 async fn get_blocks_in_pow_info<D: Database + Clone>(
     database: D,
     block_heights: Range<usize>,
     chain: Chain,
 ) -> Result<(VecDeque<u64>, VecDeque<u128>), ContextCacheError> {
-    tracing::info!("Getting blocks timestamps");
+    tracing::debug!("Getting blocks timestamps");
 
     let BlockchainResponse::BlockExtendedHeaderInRange(ext_header) = database
         .oneshot(BlockchainReadRequest::BlockExtendedHeaderInRange(

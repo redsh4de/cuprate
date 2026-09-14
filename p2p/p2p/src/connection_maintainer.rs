@@ -101,7 +101,7 @@ where
     }
 
     /// Connects to random seeds to get peers and immediately disconnects
-    #[instrument(level = "info", skip(self))]
+    #[instrument(level = "debug", skip(self))]
     async fn connect_to_random_seeds(&mut self) -> Result<(), OutboundConnectorError> {
         let seeds = self
             .config
@@ -115,7 +115,7 @@ where
         let mut handshake_futs = JoinSet::new();
 
         for seed in seeds {
-            tracing::info!("Getting peers from seed node: {}", seed);
+            tracing::debug!("Getting peers from seed node: {}", seed);
 
             let addr = *seed;
             let fut = timeout(
@@ -131,11 +131,11 @@ where
                 async move {
                     match fut.await {
                         Err(_) => {
-                            tracing::warn!("Timed out connecting to seed node: {addr}");
+                            tracing::debug!("Timed out connecting to seed node: {addr}");
                             false
                         }
                         Ok(Err(e)) => {
-                            tracing::warn!("Failed to connect to seed node {addr}: {e}");
+                            tracing::debug!("Failed to connect to seed node {addr}: {e}");
                             false
                         }
                         Ok(Ok(_)) => true,
@@ -159,7 +159,7 @@ where
     }
 
     /// Connects to a given outbound peer.
-    #[instrument(level = "info", skip_all)]
+    #[instrument(level = "debug", skip_all)]
     async fn connect_to_outbound_peer(&mut self, permit: OwnedSemaphorePermit, addr: Z::Addr) {
         let new_peers_tx = self.new_peers_tx.clone();
         let peer_sync_callback = self.peer_sync_callback.clone();

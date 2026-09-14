@@ -118,7 +118,7 @@ where
     let peer_set = PeerSet::new(new_connection_rx);
 
     if config.offline {
-        tracing::warn!("Offline mode enabled, not connecting to or listening for peers.");
+        tracing::info!("Offline mode enabled, not connecting to or listening for peers.");
 
         return Ok(NetworkInterface {
             peer_set: Buffer::new(peer_set, 10).boxed_clone(),
@@ -171,7 +171,7 @@ where
     let inbound_listener = if let Some(config) = transport_config.server_config {
         Some(T::incoming_connection_listener(config).await?)
     } else {
-        tracing::warn!("No inbound server config provided, not listening for inbound connections.");
+        tracing::info!("No inbound server config provided, not listening for inbound connections.");
         None
     };
 

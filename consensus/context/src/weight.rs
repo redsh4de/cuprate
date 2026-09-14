@@ -360,13 +360,13 @@ pub fn calculate_block_long_term_weight(
 }
 
 /// Gets the block weights from the blocks with heights in the range provided.
-#[instrument(name = "get_block_weights", skip(database))]
+#[instrument(name = "get_block_weights", skip(database), level = "debug")]
 async fn get_blocks_weight_in_range<D: Database + Clone>(
     range: Range<usize>,
     database: D,
     chain: Chain,
 ) -> Result<Vec<usize>, ContextCacheError> {
-    tracing::info!("getting block weights.");
+    tracing::debug!("getting block weights.");
 
     let BlockchainResponse::BlockExtendedHeaderInRange(ext_headers) = database
         .oneshot(BlockchainReadRequest::BlockExtendedHeaderInRange(
@@ -384,13 +384,13 @@ async fn get_blocks_weight_in_range<D: Database + Clone>(
 }
 
 /// Gets the block long term weights from the blocks with heights in the range provided.
-#[instrument(name = "get_long_term_weights", skip(database), level = "info")]
+#[instrument(name = "get_long_term_weights", skip(database), level = "debug")]
 async fn get_long_term_weight_in_range<D: Database + Clone>(
     range: Range<usize>,
     database: D,
     chain: Chain,
 ) -> Result<Vec<usize>, ContextCacheError> {
-    tracing::info!("getting block long term weights.");
+    tracing::debug!("getting block long term weights.");
 
     let BlockchainResponse::BlockExtendedHeaderInRange(ext_headers) = database
         .oneshot(BlockchainReadRequest::BlockExtendedHeaderInRange(

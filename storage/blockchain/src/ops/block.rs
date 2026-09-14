@@ -47,7 +47,7 @@ use crate::{
 /// # Panic
 ///
 /// This will panic if the given blocks cross 3 pruning stripes.
-#[instrument(skip_all, level = "info")]
+#[instrument(skip_all, level = "debug")]
 pub fn add_blocks_to_tapes(
     blocks: &[VerifiedBlockInformation],
     db: &BlockchainDatabase,
@@ -321,7 +321,7 @@ pub fn add_blocks_to_tapes(
                 }],
             )?;
 
-            tracing::debug!(
+            tracing::trace!(
                 height = block.height,
                 block_pruned_blob_idx,
                 block_v1_prunable_idx,

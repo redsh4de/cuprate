@@ -83,12 +83,12 @@ fn writer_thread(
     )>,
 ) {
     while let Ok((req, response_sender)) = receiver.recv() {
-        let span = tracing::debug_span!("write_request");
+        let span = tracing::trace_span!("write_request");
         span.in_scope(|| {
             let response = handle_blockchain_request(env, &req);
 
             match &response {
-                Ok(_) => tracing::debug!("Sending successful write response."),
+                Ok(_) => tracing::trace!("Sending successful write response."),
                 Err(e) => {
                     tracing::error!("Failed to handle write request: {e:?}");
                 }

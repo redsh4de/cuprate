@@ -570,7 +570,7 @@ where
 
                     batch.failures += 1;
                     if batch.failures > MAX_DOWNLOAD_FAILURES {
-                        tracing::debug!(
+                        tracing::warn!(
                             "Too many errors downloading blocks, stopping the block downloader."
                         );
                         return Err(BlockDownloadError::TimedOut);

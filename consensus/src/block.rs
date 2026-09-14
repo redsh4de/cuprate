@@ -317,7 +317,7 @@ where
 {
     let context = context_svc.blockchain_context();
 
-    tracing::debug!("verifying block: {}", hex::encode(prepped_block.block_hash));
+    tracing::trace!("verifying block: {}", hex::encode(prepped_block.block_hash));
 
     check_block_pow(&prepped_block.pow_hash, context.next_difficulty)
         .map_err(ConsensusError::Block)
@@ -360,7 +360,7 @@ where
         prepped_block.miner_tx_weight + txs.iter().map(|tx| tx.tx_weight).sum::<usize>();
     let total_fees = txs.iter().map(|tx| tx.fee).sum::<u64>();
 
-    tracing::debug!("Verifying block header.");
+    tracing::trace!("Verifying block header.");
     let (_, generated_coins) = check_block(
         &prepped_block.block,
         total_fees,

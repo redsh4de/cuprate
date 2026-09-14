@@ -128,7 +128,7 @@ where
     /// Sends a message to the peer, this function implements a timeout, so we don't get stuck sending a message to the
     /// peer.
     async fn send_message_to_peer(&mut self, mes: Message) -> Result<(), PeerError> {
-        tracing::debug!("Sending message: [{}] to peer", mes.command());
+        tracing::trace!("Sending message: [{}] to peer", mes.command());
 
         timeout(SENDING_TIMEOUT, self.peer_sink.send(mes.into()))
             .await
@@ -152,7 +152,7 @@ where
 
     /// Handles a request from Cuprate, unlike a broadcast this request will be directed specifically at this peer.
     async fn handle_client_request(&mut self, req: ConnectionTaskRequest) -> Result<(), PeerError> {
-        tracing::debug!("handling client request, id: {:?}", req.request.id());
+        tracing::trace!("handling client request, id: {:?}", req.request.id());
 
         if req.request.needs_response() {
             assert!(
@@ -195,7 +195,7 @@ where
 
     /// Handles a request from the connected peer to this node.
     async fn handle_peer_request(&mut self, req: PeerRequest) -> Result<(), PeerError> {
-        tracing::debug!("Received peer request: {:?}", req.id());
+        tracing::trace!("Received peer request: {:?}", req.id());
 
         let res = timeout(
             REQUEST_HANDLER_TIMEOUT,
@@ -217,7 +217,7 @@ where
 
     /// Handles a message from a peer when we are in [`State::WaitingForResponse`].
     async fn handle_potential_response(&mut self, mes: Message) -> Result<(), PeerError> {
-        tracing::debug!("Received peer message, command: {:?}", mes.command());
+        tracing::trace!("Received peer message, command: {:?}", mes.command());
 
         // If the message is defiantly a request then there is no way it can be a response to
         // our request.
@@ -262,7 +262,7 @@ where
     where
         Str: FusedStream<Item = Result<Message, cuprate_wire::BucketError>> + Unpin,
     {
-        tracing::debug!("waiting for peer/client request.");
+        tracing::trace!("waiting for peer/client request.");
 
         tokio::select! {
             biased;
@@ -304,7 +304,7 @@ where
     where
         Str: FusedStream<Item = Result<Message, cuprate_wire::BucketError>> + Unpin,
     {
-        tracing::debug!("waiting for peer response.");
+        tracing::trace!("waiting for peer response.");
 
         tokio::select! {
             biased;
