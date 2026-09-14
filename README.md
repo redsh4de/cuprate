@@ -62,3 +62,4 @@ Cuprate has a responsible vulnerability disclosure policy, see [`SECURITY.md`](/
 The `binaries/` directory is licensed under AGPL-3.0, everything else is licensed under MIT.
 
 See [`LICENSE`](/LICENSE) for more details.
+bridge relay test
