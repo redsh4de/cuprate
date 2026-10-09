@@ -222,7 +222,7 @@ macro_rules! epee_object {
                                             $(.or(Some($default)))?
                                             .or(epee_default_value)
                                             $(.map(<$ty_as>::into))?
-                                              .ok_or(cuprate_epee_encoding::error::Error::Value(format!("Missing field in data: {}", cuprate_epee_encoding::epee_object!(@internal_field_name$field, $($alt_name)?))))?
+                                              .ok_or_else(|| cuprate_epee_encoding::error::Error::Value(format!("Missing field in data: {}", cuprate_epee_encoding::epee_object!(@internal_field_name$field, $($alt_name)?))))?
                                   },
                                 )*
 
