@@ -705,6 +705,17 @@ where
                     }
 
                     self.check_pending_peers(&mut chain_tracker, &mut pending_peers);
+
+                    // If there is nothing in flight or left to request, and we have had too many empty chain entries in a row
+                    // assume the top has been found.
+                    if self.inflight_requests.is_empty()
+                        && self.amount_of_empty_chain_entries >= EMPTY_CHAIN_ENTRIES_BEFORE_TOP_ASSUMED
+                        && self.chain_entry_task.is_empty()
+                        && chain_tracker.is_empty()
+                    {
+                        tracing::debug!("Failed to find any more chain entries, probably fround the top");
+                        return Ok(());
+                    }
                 }
             }
         }

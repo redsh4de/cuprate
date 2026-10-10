@@ -133,6 +133,11 @@ impl<N: NetworkZone> ChainTracker<N> {
         self.first_height + top_block_idx
     }
 
+    /// Returns `true` if there are no blocks queued to be requested.
+    pub(crate) fn is_empty(&self) -> bool {
+        self.valid_entries.iter().all(|entry| entry.ids.is_empty())
+    }
+
     /// Returns the total number of queued batches for a certain `batch_size`.
     ///
     /// # Panics
