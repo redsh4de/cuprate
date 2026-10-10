@@ -578,6 +578,8 @@ where
 
                     self.failed_batches.push(Reverse(start_height));
                 }
+
+                self.check_pending_peers(chain_tracker, pending_peers);
             }
             Ok((client, block_batch)) => {
                 // Remove the batch from the inflight batches.
@@ -698,11 +700,11 @@ where
                                 .entry(client.info.pruning_seed)
                                 .or_default()
                                 .push(client);
-
-                            self.check_pending_peers(&mut chain_tracker, &mut pending_peers);
                         }
                         Err(_) => self.amount_of_empty_chain_entries += 1
                     }
+
+                    self.check_pending_peers(&mut chain_tracker, &mut pending_peers);
                 }
             }
         }
