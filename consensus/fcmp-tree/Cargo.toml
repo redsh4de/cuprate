@@ -14,18 +14,18 @@ tapes = ["dep:tapes"]
 cuprate-helper = { workspace = true, features = ["asynch"] }
 
 monero-oxide = { git = "https://github.com/monero-oxide/monero-oxide.git", rev = "31c26d9" }
-monero-fcmp-plus-plus = { git = "https://github.com/monero-oxide/monero-oxide.git", rev = "31c26d9" }
-monero-fcmp-plus-plus-generators =  { git = "https://github.com/monero-oxide/monero-oxide.git", rev = "31c26d9" }
-helioselene = { git = "https://github.com/monero-oxide/monero-oxide.git", rev = "31c26d9", features = ["std"] }
-ec-divisors = { git = "https://github.com/monero-oxide/monero-oxide.git", rev = "31c26d9", features = ["ed25519"] }
+monero-fcmp-plus-plus = { workspace = true, features = ["std", "compile-time-generators"] }
+monero-fcmp-plus-plus-generators = { workspace = true, features = ["std"] }
+helioselene = { workspace = true, features = ["std"] }
+ec-divisors = { workspace = true, features = ["std", "ed25519"] }
 
 bytemuck = { workspace = true }
-ciphersuite = "0.4"
+ciphersuite = { workspace = true, features = ["std"] }
 curve25519-dalek = { workspace = true, features = ["precomputed-tables"] }
-multiexp = "0.4"
+multiexp = { workspace = true, features = ["std"] }
 
 rayon = { workspace = true }
-dalek-ff-group = "0.5"
+dalek-ff-group = { workspace = true, features = ["std"] }
 
 tapes =  { workspace = true, optional = true }
 cuprate-types = { workspace = true, features = ["blockchain"] }
