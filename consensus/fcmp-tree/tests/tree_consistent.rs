@@ -85,7 +85,7 @@ fn extend_range(
     block_start: usize,
     target: usize,
 ) -> Result<CachedFcmpTreeRootData, io::Error> {
-    let mut builder = TreeBuilder::new(store.clone(), root_data);
+    let mut builder = TreeBuilder::new(store.clone(), root_data).unwrap();
 
     // Add the blocks to the store.
     builder.layer_1_writer.add_blocks(
