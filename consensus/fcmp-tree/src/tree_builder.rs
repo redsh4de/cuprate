@@ -111,6 +111,8 @@ impl CachedFcmpTreeRootData {
 }
 
 /// The tree builder.
+///
+/// Only one builder, or pop, may write to a tree store at a time.
 pub struct TreeBuilder<T: TreeStore> {
     /// The tx for the lowest layer, exposed so you can add state to the backing store while building.
     pub layer_1_writer: T::LayerWriter,
