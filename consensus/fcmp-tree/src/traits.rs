@@ -21,6 +21,7 @@ use helioselene::{Helios, Selene};
 use monero_fcmp_plus_plus::{HELIOS_FCMP_GENERATORS, SELENE_FCMP_GENERATORS};
 use monero_fcmp_plus_plus_generators::{HELIOS_HASH_INIT, SELENE_HASH_INIT};
 use monero_oxide::ed25519::Point;
+use rayon::prelude::*;
 
 use cuprate_types::fcmp::{FcmpLeafAmount, FcmpLeafData};
 
@@ -161,6 +162,15 @@ impl Child<Selene> for FcmpLeafData {
     const PARENT_SCALARS: usize = 6;
 
     fn parent_scalars(leaves: &[Self]) -> Vec<<Selene as Ciphersuite>::F> {
+        // A partial chunk is all the work there is when adding a block at the tip, so spread it
+        // over threads.
+        if leaves.len() > 4 && leaves.len() < Selene::CHUNK_LEN {
+            return leaves
+                .par_chunks(4)
+                .flat_map_iter(<Self as Child<Selene>>::parent_scalars)
+                .collect();
+        }
+
         /// Ed25519's `d`, then the `A / 3` and `c` of the map to Wei25519 in `ec_divisors`' `to_xy`.
         static CONSTANTS: LazyLock<[FieldElement; 3]> = LazyLock::new(|| {
             let d = -FieldElement::from(121_665_u64)

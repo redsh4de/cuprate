@@ -209,6 +209,21 @@ where
             assert!(incomplete_child.next().is_none());
         }
 
+        // A partial chunk of leaves is all the work there is when adding a block at the tip, so spread
+        // its multiexp over threads.
+        if C::PARENT_SCALARS > 1 && self.children.len() < P::CHUNK_LEN {
+            let piece_len = scratch_space
+                .len()
+                .div_ceil(rayon::current_num_threads())
+                .max(12);
+
+            return self.base
+                + scratch_space
+                    .par_chunks(piece_len)
+                    .map(multiexp::multiexp_vartime)
+                    .sum::<P::G>();
+        }
+
         self.base + multiexp::multiexp_vartime(scratch_space)
     }
 }
