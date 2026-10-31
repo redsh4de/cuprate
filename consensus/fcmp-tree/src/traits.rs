@@ -303,3 +303,72 @@ impl<P: FcmpCurve> Child<P> for Branch {
             .collect()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use ciphersuite::group::Group;
+    use curve25519_dalek::{EdwardsPoint, constants::EIGHT_TORSION};
+    use rand::{RngCore, rngs::OsRng};
+
+    use cuprate_helper::crypto::compute_zero_commitment;
+
+    use super::*;
+
+    /// The batched leaf conversion must match `to_xy` on each torsion cleared point.
+    #[test]
+    fn leaf_scalars_match_to_xy() {
+        let decompress = |p: [u8; 32]| CompressedEdwardsY(p).decompress().unwrap();
+        let cleared = |p: EdwardsPoint| p.mul_by_cofactor() * Scalar::from(8_u8).invert();
+        let to_xy = |p: EdwardsPoint| {
+            let (x, y) = DivisorCurve::to_xy(dalek_ff_group::EdwardsPoint(p)).unwrap();
+            [x, y]
+        };
+
+        let leaves = (0..50)
+            .map(|i| FcmpLeafData {
+                o: (EdwardsPoint::random(&mut OsRng) + EIGHT_TORSION[i % 8])
+                    .compress()
+                    .0,
+                c: if i % 2 == 0 {
+                    FcmpLeafAmount::Clear(OsRng.next_u64())
+                } else {
+                    FcmpLeafAmount::Commitment(
+                        (EdwardsPoint::random(&mut OsRng) + EIGHT_TORSION[i / 2 % 8])
+                            .compress()
+                            .0,
+                    )
+                },
+            })
+            .collect::<Vec<_>>();
+
+        let expected = leaves
+            .iter()
+            .flat_map(|leaf| {
+                let c = match leaf.c {
+                    FcmpLeafAmount::Clear(amt) => {
+                        compute_zero_commitment(amt).decompress().unwrap()
+                    }
+                    FcmpLeafAmount::Commitment(cmt) => cleared(decompress(cmt)),
+                };
+
+                [
+                    to_xy(cleared(decompress(leaf.o))),
+                    to_xy(Point::biased_hash(leaf.o).into()),
+                    to_xy(c),
+                ]
+                .into_iter()
+                .flatten()
+            })
+            .collect::<Vec<_>>();
+
+        // A full batch, and a partial chunk which is split over threads.
+        assert_eq!(
+            <FcmpLeafData as Child<Selene>>::parent_scalars(&leaves),
+            expected
+        );
+        assert_eq!(
+            <FcmpLeafData as Child<Selene>>::parent_scalars(&leaves[..10]),
+            expected[..60]
+        );
+    }
+}
