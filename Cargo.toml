@@ -196,7 +196,7 @@ monero-address        = { git = "https://github.com/monero-oxide/monero-oxide.gi
 monero-oxide          = { git = "https://github.com/monero-oxide/monero-oxide.git", rev = "946ec5f", default-features = false, features = ["std"] }
 monero-fcmp-plus-plus = { git = "https://github.com/monero-oxide/monero-oxide.git", rev = "31c26d9", default-features = false }
 monero-fcmp-plus-plus-generators = { git = "https://github.com/monero-oxide/monero-oxide.git", rev = "31c26d9", default-features = false }
-multiexp              = { version = "0.4", default-features = false }
+multiexp              = { version = "0.5", default-features = false }
 nu-ansi-term          = { version = "0.50", default-features = false }
 paste                 = { version = "1", default-features = false }
 pin-project           = { version = "1", default-features = false }
