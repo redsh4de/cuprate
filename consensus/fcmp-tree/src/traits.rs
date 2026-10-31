@@ -9,14 +9,18 @@ use std::{
 
 use ciphersuite::{
     Ciphersuite,
-    group::{ff::PrimeField, prime::PrimeGroup},
+    group::{
+        ff::{Field, PrimeField},
+        prime::PrimeGroup,
+    },
 };
-use curve25519_dalek::{EdwardsPoint, Scalar, edwards::CompressedEdwardsY};
+use curve25519_dalek::{Scalar, constants::ED25519_BASEPOINT_POINT, edwards::CompressedEdwardsY};
+use dalek_ff_group::FieldElement;
 use ec_divisors::DivisorCurve;
 use helioselene::{Helios, Selene};
 use monero_fcmp_plus_plus::{HELIOS_FCMP_GENERATORS, SELENE_FCMP_GENERATORS};
 use monero_fcmp_plus_plus_generators::{HELIOS_HASH_INIT, SELENE_HASH_INIT};
-use monero_oxide::ed25519::{CompressedPoint, Point};
+use monero_oxide::ed25519::Point;
 
 use cuprate_types::fcmp::{FcmpLeafAmount, FcmpLeafData};
 
@@ -47,11 +51,9 @@ pub(crate) trait FcmpCurve:
 pub(crate) trait Child<P: FcmpCurve>: Clone + Sized + Send + Sync {
     /// The amount of parent scalars the child will make.
     const PARENT_SCALARS: usize;
-    /// A hack type as Rust does not yet allow `[P::F; Self::PARENT_SCALARS]` as a return type.
-    type ParentScalars: IntoIterator<Item = P::F>;
 
-    /// Converts the child into the parent scalars for hashing.
-    fn parent_scalars(&self) -> Self::ParentScalars;
+    /// Converts the children into their parent scalars for hashing, in order.
+    fn parent_scalars(children: &[Self]) -> Vec<P::F>;
 }
 
 /// A trait representing a reader for a child layer.
@@ -149,70 +151,137 @@ impl FcmpCurve for Helios {
 
 impl Child<Selene> for FcmpLeafData {
     const PARENT_SCALARS: usize = 6;
-    type ParentScalars = [<Selene as Ciphersuite>::F; 6];
 
-    fn parent_scalars(&self) -> Self::ParentScalars {
-        // TODO: we can batch the computation of this which would speed up first layer hashing by around 25%
-        fn clear_torsion(p: CompressedPoint) -> EdwardsPoint {
+    fn parent_scalars(leaves: &[Self]) -> Vec<<Selene as Ciphersuite>::F> {
+        /// Ed25519's `d`, then the `A / 3` and `c` of the map to Wei25519 in `ec_divisors`' `to_xy`.
+        static CONSTANTS: LazyLock<[FieldElement; 3]> = LazyLock::new(|| {
+            let d = -FieldElement::from(121_665_u64)
+                * FieldElement::from(121_666_u64).invert().unwrap();
+            let a_div_3 =
+                FieldElement::from(486_662_u64) * FieldElement::from(3_u64).invert().unwrap();
+
+            // Take `c` from `to_xy` so its sign matches.
+            let (_, wei_y) =
+                DivisorCurve::to_xy(dalek_ff_group::EdwardsPoint(ED25519_BASEPOINT_POINT)).unwrap();
+            let (y, x) = edwards_y_x(ED25519_BASEPOINT_POINT.compress().0, d);
+            let c = wei_y * (FieldElement::ONE - y) * x * (FieldElement::ONE + y).invert().unwrap();
+
+            [d, a_div_3, c]
+        });
+
+        /// Decodes a point to its Edwards `(y, x)` as monerod's `ge_frombytes_vartime` does.
+        ///
+        /// # Panics
+        /// This function will panic if the point is not canonically encoded or not on the curve.
+        fn edwards_y_x(mut bytes: [u8; 32], d: FieldElement) -> (FieldElement, FieldElement) {
+            let x_is_odd = bytes[31] >> 7;
+            bytes[31] &= u8::MAX >> 1;
+
+            let y = FieldElement::from_repr(bytes).unwrap();
+            let y_sq = y.square();
+            let (is_square, mut x) =
+                FieldElement::sqrt_ratio_i(y_sq - FieldElement::ONE, d * y_sq + FieldElement::ONE);
+            assert!(bool::from(is_square));
+
+            if x.is_odd().unwrap_u8() != x_is_odd {
+                x = -x;
+            }
+            // `-0` is not canonical.
+            assert_eq!(x.is_odd().unwrap_u8(), x_is_odd);
+
+            (y, x)
+        }
+
+        /// The Edwards `(y, x)` of an on-chain point with its torsion cleared.
+        fn torsion_cleared(bytes: [u8; 32], d: FieldElement) -> (FieldElement, FieldElement) {
             static INV_EIGHT: LazyLock<Scalar> = LazyLock::new(|| Scalar::from(8_u8).invert());
 
-            let p = CompressedEdwardsY::from_slice(&p.to_bytes())
-                .unwrap()
-                .decompress()
-                .unwrap();
+            let y_x = edwards_y_x(bytes, d);
+            let point = CompressedEdwardsY(bytes).decompress().unwrap();
 
-            if p.is_torsion_free() {
-                p
+            if point.is_torsion_free() {
+                y_x
             } else {
-                p.mul_by_cofactor().mul(*INV_EIGHT)
+                edwards_y_x(point.mul_by_cofactor().mul(*INV_EIGHT).compress().0, d)
             }
         }
 
-        fn ed25519_point_to_tuple(point: EdwardsPoint) -> ([u8; 32], [u8; 32]) {
-            let p =
-                dalek_ff_group::EdwardsPoint::to_xy(dalek_ff_group::EdwardsPoint(point)).unwrap();
+        let [d, a_div_3, wei_c] = *CONSTANTS;
 
-            (p.0.to_repr(), p.1.to_repr())
-        }
+        // An Ed25519 `(x, y)` is `((1 + y) / (1 - y) + A / 3, c (1 + y) / ((1 - y) x))` on Wei25519, so
+        // collect the denominators to invert them all at once.
+        let mut one_plus_y = Vec::with_capacity(leaves.len() * 3);
+        let mut denominators = Vec::with_capacity(leaves.len() * 3);
 
-        let o = clear_torsion(CompressedPoint::from(self.o));
+        for leaf in leaves {
+            let i = Point::biased_hash(leaf.o).into();
 
-        let c = match self.c {
-            // A clear amt, we can create a 0 commitment which we do not need to check for torsion
-            FcmpLeafAmount::Clear(amt) => cuprate_helper::crypto::compute_zero_commitment(amt)
-                .decompress()
-                .unwrap(),
-            FcmpLeafAmount::Commitment(cmt) => {
+            let c = match leaf.c {
+                // A clear amt, we can create a 0 commitment which we do not need to check for torsion
+                FcmpLeafAmount::Clear(amt) => edwards_y_x(
+                    cuprate_helper::crypto::compute_zero_commitment(amt)
+                        .compress()
+                        .to_bytes(),
+                    d,
+                ),
                 // A commitment to an amt, check it for torsion.
-                clear_torsion(CompressedPoint::from(cmt))
+                FcmpLeafAmount::Commitment(cmt) => torsion_cleared(cmt, d),
+            };
+
+            for (y, x) in [
+                torsion_cleared(leaf.o, d),
+                edwards_y_x(i.compress().0, d),
+                c,
+            ] {
+                let one_minus_y = FieldElement::ONE - y;
+                one_plus_y.push(FieldElement::ONE + y);
+                denominators.push([one_minus_y, one_minus_y * x]);
             }
-        };
+        }
 
-        let i = Point::biased_hash(self.o).into();
+        // Invert the product of all the denominators, then take each denominator back out of it.
+        let denominators_flat = denominators.as_flattened_mut();
+        let mut products = Vec::with_capacity(denominators_flat.len());
+        let mut product = FieldElement::ONE;
+        for denominator in &*denominators_flat {
+            products.push(product);
+            product *= denominator;
+        }
 
-        let o = ed25519_point_to_tuple(o);
-        let i = ed25519_point_to_tuple(i);
-        let c = ed25519_point_to_tuple(c);
+        // Only the identity has a zero denominator.
+        let mut inverse = product
+            .invert()
+            .expect("leaf points must not be the identity");
+        for (denominator, product) in denominators_flat.iter_mut().zip(products).rev() {
+            (*denominator, inverse) = (inverse * product, inverse * *denominator);
+        }
 
-        let f = |c| <Selene as Ciphersuite>::F::from_repr(c).unwrap();
-
-        [f(o.0), f(o.1), f(i.0), f(i.1), f(c.0), f(c.1)]
+        one_plus_y
+            .iter()
+            .zip(denominators)
+            .flat_map(|(one_plus_y, [inverse, inverse_with_x])| {
+                [
+                    *one_plus_y * inverse + a_div_3,
+                    wei_c * one_plus_y * inverse_with_x,
+                ]
+            })
+            .collect()
     }
 }
 
 impl<P: FcmpCurve> Child<P> for Branch {
     const PARENT_SCALARS: usize = 1;
-    type ParentScalars = [P::F; 1];
 
-    fn parent_scalars(&self) -> Self::ParentScalars {
+    fn parent_scalars(children: &[Self]) -> Vec<P::F> {
         #[inline(always)]
         const fn clear_sign(mut x: [u8; 32]) -> [u8; 32] {
             x[31] &= u8::MAX >> 1;
             x
         }
 
-        let child = clear_sign(*self);
-
-        [P::F::from_repr_vartime(child).unwrap()]
+        children
+            .iter()
+            .map(|child| P::F::from_repr_vartime(clear_sign(*child)).unwrap())
+            .collect()
     }
 }

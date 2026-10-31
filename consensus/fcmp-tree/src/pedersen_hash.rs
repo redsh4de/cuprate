@@ -185,9 +185,8 @@ where
         scratch_space.clear();
 
         scratch_space.extend(
-            self.children
-                .iter()
-                .flat_map(Child::parent_scalars)
+            C::parent_scalars(self.children)
+                .into_iter()
                 .zip(
                     P::generators()
                         .generators
@@ -204,7 +203,8 @@ where
             assert_eq!(C::PARENT_SCALARS, 1);
             // If we had an incomplete child then we need to take the old one away from the new
             // child in that space so we don't double count the grandchildren in the hash.
-            let mut incomplete_child = incomplete_child.parent_scalars().into_iter();
+            let mut incomplete_child =
+                C::parent_scalars(std::slice::from_ref(incomplete_child)).into_iter();
             scratch_space[0].0 -= incomplete_child.next().unwrap();
             assert!(incomplete_child.next().is_none());
         }
