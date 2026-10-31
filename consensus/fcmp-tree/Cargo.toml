@@ -11,7 +11,7 @@ repository = "https://github.com/Cuprate/cuprate/tree/main/consensus/fcmp-tree"
 tapes = ["dep:tapes", "dep:bytemuck"]
 
 [dependencies]
-cuprate-helper = { workspace = true, features = ["crypto"] }
+cuprate-helper = { workspace = true, features = ["cast", "crypto"] }
 
 monero-oxide = { git = "https://github.com/monero-oxide/monero-oxide.git", rev = "31c26d9" }
 monero-fcmp-plus-plus = { workspace = true, features = ["std", "compile-time-generators"] }
@@ -38,3 +38,6 @@ curve25519-dalek = { workspace = true, features = ["group"] }
 [[test]]
 name = "tree_consistent"
 required-features = ["tapes"]
+
+[lints]
+workspace = true
