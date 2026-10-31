@@ -41,35 +41,21 @@ pub struct TapesTreeStore {
 impl TapesTreeStore {
     /// Open the store or create a new one if one does not exist.
     pub fn open(config: FcmpTreeStorageConfig) -> io::Result<Self> {
-        let tapes = Arc::new(Tapes::open(&config.path.join("tree"))?);
+        let dir = config.path.join("tree");
+        let tapes = Arc::new(Tapes::open(&dir)?);
         let mut append = tapes.append();
+
+        let options = || CachedTapeOpenOptions {
+            inner: WholeTapeOpenOptions { dir: dir.clone() },
+            top_cache_size: config.layer_cache_size,
+        };
 
         let layers = LAYER_NAMES
             .iter()
-            .map(|name| {
-                append
-                    .open_fixed_sized_tape(
-                        name,
-                        CachedTapeOpenOptions {
-                            inner: WholeTapeOpenOptions {
-                                dir: config.path.join("tree"),
-                            },
-                            top_cache_size: config.layer_cache_size,
-                        },
-                    )
-                    .map(Arc::new)
-            })
+            .map(|name| append.open_fixed_sized_tape(name, options()).map(Arc::new))
             .collect::<io::Result<_>>()?;
 
-        let blocks = Arc::new(append.open_fixed_sized_tape(
-            "blocks",
-            CachedTapeOpenOptions {
-                inner: WholeTapeOpenOptions {
-                    dir: config.path.join("tree"),
-                },
-                top_cache_size: config.layer_cache_size,
-            },
-        )?);
+        let blocks = Arc::new(append.open_fixed_sized_tape("blocks", options())?);
 
         append.commit(Persistence::SyncAll)?;
 
