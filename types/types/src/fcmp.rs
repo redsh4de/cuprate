@@ -15,8 +15,8 @@ pub struct FcmpOutput {
 
 /// A leaf in the tree.
 ///
-/// All [`FcmpLeafData`] instances must be valid to put into the tree. i.e. all points should have a
-/// non-zero prime order component.
+/// All [`FcmpLeafData`] instances must be valid to put into the tree. i.e. all points should be
+/// canonically encoded and have a non-zero prime order component.
 #[derive(Clone, Debug, PartialEq, Eq, Ord, PartialOrd)]
 pub struct FcmpLeafData {
     /// The output point.
